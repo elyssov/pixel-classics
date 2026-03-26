@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Minesweeper</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #c0c0c0;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    min-height: 100dvh;
+    touch-action: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    padding: 8px;
+  }
+
+  .header {
+    background: #c0c0c0;
+    border: 3px solid;
+    border-color: #808080 #fff #fff #808080;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+    width: 100%;
+    max-width: 500px;
+  }
+
+  .counter {
+    background: #000;
+    color: #ff0000;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 24px;
+    font-weight: bold;
+    padding: 2px 6px;
+    min-width: 50px;
+    text-align: center;
+    border: 2px solid;
+    border-color: #808080 #fff #fff #808080;
+  }
+
+  .face-btn {
+    width: 36px; height: 36px;
+    font-size: 22px;
+    border: 2px solid;
+    border-color: #fff #808080 #808080 #fff;
+    background: #c0c0c0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+  .face-btn:active {
+    border-color: #808080 #fff #fff #808080;
+  }
+
+  .board {
+    border: 3px solid;
+    border-color: #808080 #fff #fff #808080;
+    display: inline-grid;
+    background: #c0c0c0;
+  }
+
+  .cell {
+    width: 28px; height: 28px;
+    border: 2px solid;
+    border-color: #fff #808080 #808080 #fff;
+    background: #c0c0c0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  .cell.revealed {
+    border: 1px solid #808080;
+    background: #d0d0d0;
+  }
+
+  .cell.mine-hit {
+    background: #ff0000;
+  }
+
+  .cell.flagged::after {
+    content: '\u2691';
+    color: #ff0000;
+    font-size: 16px;
+  }
+
+  .cell[data-num="1"] { color: #0000ff; }
+  .cell[data-num="2"] { color: #008000; }
+  .cell[data-num="3"] { color: #ff0000; }
+  .cell[data-num="4"] { color: #000080; }
+  .cell[data-num="5"] { color: #800000; }
+  .cell[data-num="6"] { color: #008080; }
+  .cell[data-num="7"] { color: #000000; }
+  .cell[data-num="8"] { color: #808080; }
+
+  .difficulty {
+    margin-top: 8px;
+    display: flex;
+    gap: 6px;
+  }
+  .diff-btn {
+    padding: 4px 12px;
+    border: 2px solid;
+    border-color: #fff #808080 #808080 #fff;
+    background: #c0c0c0;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .diff-btn:active {
+    border-color: #808080 #fff #fff #808080;
+  }
+  .diff-btn.active {
+    border-color: #808080 #fff #fff #808080;
+    background: #a0a0a0;
+  }
+</style>
+</head><body>
+
+<div class="header">
+  <div class="counter" id="mine-counter">010</div>
+  <button class="face-btn" id="face" onclick="newGame()">&#128578;</button>
+  <div class="counter" id="timer">000</div>
+</div>
+
+<div class="board" id="board"></div>
+
+<div class="difficulty">
+  <button class="diff-btn active" onclick="setDifficulty(9,9,10,this)">Easy</button>
+  <button class="diff-btn" onclick="setDifficulty(12,12,25,this)">Medium</button>
+  <button class="diff-btn" onclick="setDifficulty(16,16,40,this)">Hard</button>
+</div>
+
+<script>
+let ROWS = 9, COLS = 9, MINES = 10;
+let board, revealed, flagged, gameOver, gameWon, firstClick, timerInterval, seconds;
+
+function setDifficulty(r, c, m, btn) {
+  ROWS = r; COLS = c; MINES = m;
+  document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  newGame();
+}
+
+function newGame() {
+  clearInterval(timerInterval);
+  seconds = 0;
+  gameOver = false;
+  gameWon = false;
+  firstClick = true;
+  document.getElementById('timer').textContent = '000';
+  document.getElementById('face').innerHTML = '&#128578;';
+
+  board = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+  revealed = Array.from({length: ROWS}, () => Array(COLS).fill(false));
+  flagged = Array.from({length: ROWS}, () => Array(COLS).fill(false));
+
+  updateMineCounter();
+  render();
+}
+
+function placeMines(safeR, safeC) {
+  let placed = 0;
+  while (placed < MINES) {
+    const r = Math.floor(Math.random() * ROWS);
+    const c = Math.floor(Math.random() * COLS);
+    if (board[r][c] === -1) continue;
+    if (Math.abs(r - safeR) <= 1 && Math.abs(c - safeC) <= 1) continue;
+    board[r][c] = -1;
+    placed++;
+  }
+  // Calculate numbers
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (board[r][c] === -1) continue;
+      let count = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = r + dr, nc = c + dc;
+          if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && board[nr][nc] === -1) count++;
+        }
+      }
+      board[r][c] = count;
+    }
+  }
+}
+
+function reveal(r, c) {
+  if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return;
+  if (revealed[r][c] || flagged[r][c]) return;
+
+  revealed[r][c] = true;
+
+  if (board[r][c] === 0) {
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        reveal(r + dr, c + dc);
+      }
+    }
+  }
+}
+
+function handleClick(r, c) {
+  if (gameOver || gameWon) return;
+  if (flagged[r][c]) return;
+
+  if (firstClick) {
+    firstClick = false;
+    placeMines(r, c);
+    timerInterval = setInterval(() => {
+      seconds++;
+      document.getElementById('timer').textContent = String(seconds).padStart(3, '0');
+    }, 1000);
+  }
+
+  if (board[r][c] === -1) {
+    // BOOM
+    revealed[r][c] = true;
+    gameOver = true;
+    clearInterval(timerInterval);
+    document.getElementById('face').innerHTML = '&#128565;';
+    // Reveal all mines
+    for (let i = 0; i < ROWS; i++)
+      for (let j = 0; j < COLS; j++)
+        if (board[i][j] === -1) revealed[i][j] = true;
+    render();
+    return;
+  }
+
+  reveal(r, c);
+  checkWin();
+  render();
+}
+
+function handleFlag(r, c) {
+  if (gameOver || gameWon || revealed[r][c]) return;
+  flagged[r][c] = !flagged[r][c];
+  updateMineCounter();
+  render();
+}
+
+function checkWin() {
+  let unrevealed = 0;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (!revealed[r][c]) unrevealed++;
+
+  if (unrevealed === MINES) {
+    gameWon = true;
+    clearInterval(timerInterval);
+    document.getElementById('face').innerHTML = '&#128526;';
+  }
+}
+
+function updateMineCounter() {
+  let flags = 0;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (flagged[r][c]) flags++;
+  document.getElementById('mine-counter').textContent = String(MINES - flags).padStart(3, '0');
+}
+
+let longPressTimer = null;
+
+function render() {
+  const boardEl = document.getElementById('board');
+  boardEl.style.gridTemplateColumns = `repeat(${COLS}, 28px)`;
+  boardEl.innerHTML = '';
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+
+      if (revealed[r][c]) {
+        cell.classList.add('revealed');
+        if (board[r][c] === -1) {
+          cell.innerHTML = '&#128163;'; // bomb
+          if (gameOver && !flagged[r][c]) cell.classList.add('mine-hit');
+        } else if (board[r][c] > 0) {
+          cell.textContent = board[r][c];
+          cell.dataset.num = board[r][c];
+        }
+      } else if (flagged[r][c]) {
+        cell.classList.add('flagged');
+      }
+
+      // Click to reveal
+      cell.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (!flagged[r][c]) handleClick(r, c);
+      });
+
+      // Long press / right click to flag
+      cell.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        handleFlag(r, c);
+      });
+
+      cell.addEventListener('touchstart', (e) => {
+        longPressTimer = setTimeout(() => {
+          handleFlag(r, c);
+          longPressTimer = null;
+        }, 400);
+      }, {passive: true});
+
+      cell.addEventListener('touchend', (e) => {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      }, {passive: true});
+
+      cell.addEventListener('touchmove', () => {
+        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      }, {passive: true});
+
+      boardEl.appendChild(cell);
+    }
+  }
+}
+
+newGame();
+</script>
+</body></html>
