@@ -127,16 +127,35 @@ function update() {
   for (let i = paratroopers.length - 1; i >= 0; i--) {
     const p = paratroopers[i];
     if (!p.landed) {
+      // Falling
       p.y += p.chute ? p.vy : p.vy * 4;
 
       if (p.y >= H() - 25) {
+        if (!p.chute) {
+          // No chute = splat! Dead on impact
+          paratroopers.splice(i, 1);
+          continue;
+        }
         p.y = H() - 25;
         p.landed = true;
-        // Count which side
-        if (p.x < GUN_X()) landed.left++;
-        else landed.right++;
+        p.runSpeed = 0.6 + Math.random() * 0.4;
+        p.frame = 0;
+      }
+    } else {
+      // RUNNING toward the gun!
+      const gunX = GUN_X();
+      const dir = p.x < gunX ? 1 : -1;
+      p.x += dir * p.runSpeed;
+      p.frame = (p.frame || 0) + 0.15;
 
-        // Game over: 4 on either side
+      // Reached the gun base?
+      if (Math.abs(p.x - gunX) < 15) {
+        p.atGun = true;
+        if (p.x < gunX) landed.left++;
+        else landed.right++;
+        paratroopers.splice(i, 1);
+
+        // Game over: 4 reached from either side
         if (landed.left >= 4 || landed.right >= 4) {
           gameOver = true;
         }
@@ -170,18 +189,19 @@ function update() {
     }
     if (hit) continue;
 
-    // Hit paratrooper?
+    // Hit paratrooper? (both falling AND running)
     for (let j = paratroopers.length - 1; j >= 0; j--) {
       const p = paratroopers[j];
-      if (!p.landed && Math.abs(b.x - p.x) < 10 && Math.abs(b.y - p.y) < 12) {
-        if (p.chute) {
-          // Shoot chute — trooper falls fast
+      if (Math.abs(b.x - p.x) < 10 && Math.abs(b.y - p.y) < 14) {
+        if (!p.landed && p.chute) {
+          // Shoot chute — trooper falls fast (no chute = splat on landing)
           p.chute = false;
           p.vy = 3;
           score += 5;
         } else {
+          // Kill trooper (airborne without chute, or running)
           paratroopers.splice(j, 1);
-          score += 10;
+          score += p.landed ? 15 : 10;
         }
         bullets.splice(i, 1);
         break;
@@ -246,26 +266,66 @@ function draw() {
 
   // Paratroopers
   for (const p of paratroopers) {
-    if (p.chute) {
+    if (p.chute && !p.landed) {
       // Parachute
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.arc(p.x, p.y - 15, 12, Math.PI, 0);
+      ctx.arc(p.x, p.y - 18, 13, Math.PI, 0);
       ctx.fill();
+      // Chute lines
       ctx.strokeStyle = '#999';
       ctx.lineWidth = 0.5;
       ctx.beginPath();
-      ctx.moveTo(p.x - 12, p.y - 15); ctx.lineTo(p.x, p.y);
-      ctx.moveTo(p.x + 12, p.y - 15); ctx.lineTo(p.x, p.y);
+      ctx.moveTo(p.x - 13, p.y - 18); ctx.lineTo(p.x - 2, p.y - 2);
+      ctx.moveTo(p.x + 13, p.y - 18); ctx.lineTo(p.x + 2, p.y - 2);
+      ctx.moveTo(p.x, p.y - 18); ctx.lineTo(p.x, p.y - 2);
       ctx.stroke();
     }
-    // Body
+
     ctx.fillStyle = p.landed ? '#c62828' : '#e53935';
-    ctx.fillRect(p.x - 3, p.y - 5, 6, 12);
-    // Head
-    ctx.beginPath();
-    ctx.arc(p.x, p.y - 8, 4, 0, Math.PI * 2);
-    ctx.fill();
+
+    if (p.landed) {
+      // Running animation — legs alternate
+      const legOffset = Math.sin((p.frame || 0) * Math.PI) * 4;
+      const armOffset = Math.sin((p.frame || 0) * Math.PI) * 3;
+      const dir = p.x < GUN_X() ? 1 : -1;
+
+      // Body (leaning forward)
+      ctx.fillRect(p.x - 2 + dir, p.y - 5, 5, 9);
+      // Head
+      ctx.beginPath();
+      ctx.arc(p.x + dir * 2, p.y - 8, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      // Legs (running)
+      ctx.strokeStyle = '#c62828';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y + 4);
+      ctx.lineTo(p.x + legOffset, p.y + 12);
+      ctx.moveTo(p.x, p.y + 4);
+      ctx.lineTo(p.x - legOffset, p.y + 12);
+      ctx.stroke();
+      // Arms (swinging)
+      ctx.beginPath();
+      ctx.moveTo(p.x + dir, p.y - 2);
+      ctx.lineTo(p.x + dir + armOffset, p.y + 4);
+      ctx.moveTo(p.x + dir, p.y - 2);
+      ctx.lineTo(p.x + dir - armOffset, p.y + 4);
+      ctx.stroke();
+    } else {
+      // Hanging from chute / falling
+      ctx.fillRect(p.x - 2, p.y - 4, 5, 10);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 7, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      // Dangling legs
+      ctx.strokeStyle = '#e53935';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(p.x - 1, p.y + 6); ctx.lineTo(p.x - 2, p.y + 13);
+      ctx.moveTo(p.x + 2, p.y + 6); ctx.lineTo(p.x + 3, p.y + 13);
+      ctx.stroke();
+    }
   }
 
   // Bullets

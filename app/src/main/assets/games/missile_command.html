@@ -255,12 +255,34 @@ function update() {
     }
   }
 
-  // Update explosions
+  // Update explosions — including friendly fire!
   for (let i = explosions.length - 1; i >= 0; i--) {
     const e = explosions[i];
     if (e.growing) {
       e.r += 1.8;
       if (e.r >= e.maxR) e.growing = false;
+
+      // Friendly fire: explosion damages cities and batteries too!
+      // ABM interceptors are nuclear — their blast is dangerous
+      for (const city of cities) {
+        if (city.alive) {
+          const dx = city.x - e.x;
+          const dy = city.y - e.y;
+          if (dx * dx + dy * dy < e.r * e.r) {
+            city.alive = false;
+            addParticles(city.x, city.y, 10, '#FF8800');
+          }
+        }
+      }
+      for (const bat of batteries) {
+        if (bat.ammo > 0) {
+          const dx = bat.x - e.x;
+          const dy = bat.y - e.y;
+          if (dx * dx + dy * dy < (e.r * 0.7) * (e.r * 0.7)) {
+            bat.ammo = 0; // battery destroyed by own explosion
+          }
+        }
+      }
     } else {
       e.r -= 0.6;
       if (e.r <= 0) explosions.splice(i, 1);
