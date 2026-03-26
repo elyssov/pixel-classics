@@ -4,320 +4,442 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Pixel Classics</title>
 <style>
-  @font-face {
-    font-family: 'DOS';
-    src: local('Consolas'), local('Courier New'), local('monospace');
-  }
-
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    background: #0000AA;
+    background: #000000;
     color: #AAAAAA;
-    font-family: 'Consolas', 'Courier New', monospace;
+    font-family: 'Consolas', 'Courier New', 'Lucida Console', monospace;
     height: 100vh;
     height: 100dvh;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* ═══ NC-style top bar ═══ */
-  .top-bar {
-    background: #000000;
-    color: #00AAAA;
-    padding: 2px 8px;
+  /* ═══════════════════════════════
+     DOS BOOT SCREEN
+     ═══════════════════════════════ */
+  #boot-screen {
+    background: #000;
+    color: #AAA;
+    padding: 16px;
+    height: 100vh;
+    height: 100dvh;
     font-size: 13px;
-    display: flex;
-    justify-content: space-between;
-    letter-spacing: 1px;
+    line-height: 1.6;
+    overflow: hidden;
+    white-space: pre;
+  }
+  #boot-screen .bios { color: #AAA; }
+  #boot-screen .white { color: #FFF; }
+  #boot-screen .highlight { color: #FFFF55; }
+  #boot-screen .sys { color: #55FF55; }
+  #boot-screen .driver { color: #55FFFF; }
+  #boot-screen .prompt { color: #AAA; }
+  #boot-screen .cursor {
+    display: inline-block;
+    width: 8px; height: 14px;
+    background: #AAA;
+    animation: cursorBlink 0.5s step-end infinite;
+    vertical-align: bottom;
+  }
+  @keyframes cursorBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
   }
 
-  /* ═══ Main panel ═══ */
-  .panel {
+  /* ═══════════════════════════════
+     NORTON COMMANDER
+     ═══════════════════════════════ */
+  #nc-screen {
+    display: none;
+    background: #0000AA;
+    height: 100vh;
+    height: 100dvh;
+    flex-direction: column;
+  }
+
+  /* Top menu bar */
+  .nc-menu {
+    background: #000;
+    color: #00AAAA;
+    padding: 1px 4px;
+    font-size: 12px;
+    display: flex;
+    gap: 8px;
+  }
+  .nc-menu span { padding: 0 4px; }
+  .nc-menu .hl { color: #FFFF55; }
+
+  /* Panels container */
+  .nc-panels {
     flex: 1;
-    margin: 4px;
+    display: flex;
+    gap: 0;
+    padding: 2px;
+    min-height: 0;
+  }
+
+  /* Panel */
+  .nc-panel {
+    flex: 1;
     border: 2px solid #00AAAA;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
   }
 
-  .panel-header {
-    background: #000000;
+  .nc-panel-header {
+    background: #0000AA;
     color: #FFFF55;
     text-align: center;
-    padding: 4px 0;
-    font-size: 15px;
+    padding: 1px 0;
+    font-size: 12px;
     font-weight: bold;
-    letter-spacing: 3px;
+    letter-spacing: 1px;
     border-bottom: 1px solid #00AAAA;
+    flex-shrink: 0;
   }
 
-  .panel-header .fire { color: #FF5555; }
+  .nc-panel-cols {
+    background: #0000AA;
+    color: #00AAAA;
+    font-size: 10px;
+    padding: 0 6px;
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid #005555;
+    flex-shrink: 0;
+  }
 
-  /* ═══ Game list ═══ */
-  .game-list {
+  .nc-panel-body {
     flex: 1;
     overflow-y: auto;
-    padding: 4px 0;
+    background: #0000AA;
+    padding: 0;
   }
 
-  .game-item {
-    display: flex;
-    align-items: center;
-    padding: 8px 12px;
-    cursor: pointer;
-    transition: none;
-    gap: 10px;
-    border-bottom: 1px solid #000088;
-  }
-
-  .game-item:hover,
-  .game-item:active {
-    background: #00AAAA;
-    color: #000000;
-  }
-
-  .game-item:hover .game-year,
-  .game-item:active .game-year {
-    color: #000088;
-  }
-
-  .game-item:hover .game-icon,
-  .game-item:active .game-icon {
-    color: #000000;
-  }
-
-  .game-item.selected {
-    background: #00AAAA;
-    color: #000000;
-  }
-
-  .game-icon {
-    font-size: 18px;
-    width: 28px;
-    text-align: center;
-    color: #FFFF55;
-    flex-shrink: 0;
-  }
-
-  .game-info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .game-name {
-    font-size: 15px;
-    font-weight: bold;
-    color: #FFFFFF;
-    letter-spacing: 0.5px;
-  }
-
-  .game-item:hover .game-name,
-  .game-item:active .game-name,
-  .game-item.selected .game-name {
-    color: #000000;
-  }
-
-  .game-desc {
-    font-size: 11px;
+  .nc-panel-footer {
+    background: #0000AA;
     color: #AAAAAA;
-    margin-top: 1px;
-  }
-
-  .game-item:hover .game-desc,
-  .game-item:active .game-desc {
-    color: #000088;
-  }
-
-  .game-year {
-    font-size: 12px;
-    color: #00AAAA;
-    flex-shrink: 0;
-  }
-
-  .game-mode {
     font-size: 10px;
-    padding: 1px 4px;
-    border: 1px solid #00AAAA;
-    color: #00AAAA;
+    padding: 1px 6px;
+    border-top: 1px solid #00AAAA;
+    text-align: center;
     flex-shrink: 0;
   }
 
-  .game-item:hover .game-mode {
-    border-color: #000088;
-    color: #000088;
+  /* File rows */
+  .nc-file {
+    display: flex;
+    padding: 1px 6px;
+    font-size: 12px;
+    cursor: default;
+    gap: 4px;
   }
 
-  .game-mode.pvp {
-    color: #FF5555;
-    border-color: #FF5555;
+  .nc-file .fname { flex: 1; color: #00FFFF; white-space: nowrap; overflow: hidden; }
+  .nc-file .fext { width: 40px; color: #00FFFF; }
+  .nc-file .fsize { width: 55px; text-align: right; color: #AAAAAA; }
+  .nc-file .fdate { width: 70px; text-align: right; color: #AAAAAA; font-size: 11px; }
+
+  /* EXE files are bright green */
+  .nc-file.exe .fname,
+  .nc-file.exe .fext { color: #55FF55; font-weight: bold; }
+
+  /* Directories are white */
+  .nc-file.dir .fname { color: #FFFFFF; font-weight: bold; }
+
+  /* SYS files are dark */
+  .nc-file.sys .fname,
+  .nc-file.sys .fext { color: #AAAAAA; }
+
+  /* Selected / clickable game */
+  .nc-file.game {
+    cursor: pointer;
+  }
+  .nc-file.game:hover,
+  .nc-file.game:active {
+    background: #00AAAA;
+  }
+  .nc-file.game:hover .fname,
+  .nc-file.game:hover .fext,
+  .nc-file.game:hover .fsize,
+  .nc-file.game:hover .fdate {
+    color: #000000;
+  }
+  .nc-file.selected {
+    background: #00AAAA;
+  }
+  .nc-file.selected .fname,
+  .nc-file.selected .fext,
+  .nc-file.selected .fsize,
+  .nc-file.selected .fdate {
+    color: #000;
   }
 
-  .game-item:hover .game-mode.pvp {
-    color: #000088;
-    border-color: #000088;
-  }
-
-  /* ═══ Status bar ═══ */
-  .status-bar {
-    background: #000000;
+  /* Status bar */
+  .nc-status {
+    background: #000;
     color: #AAAAAA;
-    padding: 3px 8px;
+    padding: 2px 8px;
     font-size: 11px;
     display: flex;
     justify-content: space-between;
-    border-top: 1px solid #00AAAA;
+    flex-shrink: 0;
   }
+  .nc-status .sync { color: #55FF55; }
 
-  .status-bar .sync {
-    color: #55FF55;
-    animation: blink 2s ease-in-out infinite;
-  }
-
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
-
-  /* ═══ Bottom function keys ═══ */
-  .fn-bar {
-    background: #000000;
+  /* Function key bar */
+  .nc-fnbar {
+    background: #000;
     display: flex;
     font-size: 12px;
+    flex-shrink: 0;
   }
-
-  .fn-key {
+  .nc-fnkey {
     flex: 1;
     text-align: center;
-    padding: 5px 2px;
-    cursor: pointer;
+    padding: 3px 0;
     border-right: 1px solid #333;
   }
+  .nc-fnkey:last-child { border: none; }
+  .nc-fnkey .n { color: #AAAAAA; font-size: 10px; }
+  .nc-fnkey .l { color: #000; background: #00AAAA; padding: 0 3px; font-size: 11px; }
 
-  .fn-key:last-child { border: none; }
-
-  .fn-key .num {
-    color: #AAAAAA;
-  }
-
-  .fn-key .label {
-    color: #000000;
-    background: #00AAAA;
-    padding: 0 3px;
-  }
-
-  .fn-key:active .label {
-    background: #FFFFFF;
-  }
-
-  /* ═══ Info panel (bottom half on wide screens) ═══ */
-  .info-panel {
-    margin: 0 4px 4px;
-    border: 2px solid #00AAAA;
-    padding: 8px 12px;
-    max-height: 120px;
-    overflow-y: auto;
-  }
-
-  .info-panel h3 {
-    color: #FFFF55;
-    font-size: 13px;
-    margin-bottom: 4px;
-    letter-spacing: 1px;
-  }
-
-  .info-panel p {
-    font-size: 12px;
-    line-height: 1.5;
-    color: #AAAAAA;
-  }
-
-  .info-panel .highlight { color: #55FF55; }
-  .info-panel .warning { color: #FF5555; }
-
-  /* ═══ Responsive ═══ */
-  @media (max-height: 500px) {
-    .info-panel { display: none; }
-    .game-item { padding: 6px 12px; }
+  /* Responsive: stack panels on very narrow screens */
+  @media (max-width: 420px) {
+    .nc-panels { flex-direction: column; }
+    .nc-panel:last-child { max-height: 30vh; }
+    .nc-file .fdate { display: none; }
   }
 </style>
 </head><body>
 
-<div class="top-bar">
-  <span>Pixel Classics v1.0</span>
-  <span>&#9484;&#9472; C:\GAMES &#9472;&#9488;</span>
-  <span>Free: 640K</span>
-</div>
+<!-- ═══ DOS Boot Screen ═══ -->
+<div id="boot-screen"></div>
 
-<div class="panel">
-  <div class="panel-header">
-    &#9556;&#9552; C:\GAMES &#9552;&#9559;
+<!-- ═══ Norton Commander ═══ -->
+<div id="nc-screen">
+
+  <div class="nc-menu">
+    <span><span class="hl">L</span>eft</span>
+    <span><span class="hl">F</span>ile</span>
+    <span><span class="hl">C</span>ommand</span>
+    <span><span class="hl">O</span>ptions</span>
+    <span><span class="hl">R</span>ight</span>
   </div>
-  <div class="game-list" id="game-list"></div>
-</div>
 
-<div class="info-panel" id="info-panel">
-  <h3>&#9654; ABOUT</h3>
-  <p>Classic arcade games from the <span class="highlight">golden age</span> of gaming.
-     Tap a game to play. <span class="highlight">Multiplayer</span> games sync via local WiFi.</p>
-</div>
+  <div class="nc-panels">
+    <!-- Left Panel: C:\GAMES -->
+    <div class="nc-panel">
+      <div class="nc-panel-header">C:\GAMES</div>
+      <div class="nc-panel-cols"><span>Name</span><span>Size</span><span>Date</span></div>
+      <div class="nc-panel-body" id="left-panel"></div>
+      <div class="nc-panel-footer" id="left-footer">GAMES: 8 files, 2,048K</div>
+    </div>
 
-<div class="status-bar">
-  <span><span class="sync">&#9679;</span> Score sync active &mdash; 0 players nearby</span>
-  <span id="clock"></span>
-</div>
+    <!-- Right Panel: C:\ (decorative) -->
+    <div class="nc-panel">
+      <div class="nc-panel-header">C:\</div>
+      <div class="nc-panel-cols"><span>Name</span><span>Size</span><span>Date</span></div>
+      <div class="nc-panel-body" id="right-panel"></div>
+      <div class="nc-panel-footer">C:\ 14 files, 640K free</div>
+    </div>
+  </div>
 
-<div class="fn-bar">
-  <div class="fn-key"><span class="num">1</span><span class="label">Help</span></div>
-  <div class="fn-key"><span class="num">2</span><span class="label">Scores</span></div>
-  <div class="fn-key"><span class="num">3</span><span class="label">Settings</span></div>
-  <div class="fn-key"><span class="num">4</span><span class="label">About</span></div>
+  <!-- Status -->
+  <div class="nc-status">
+    <span>C:\GAMES\</span>
+    <span><span class="sync">&#9679;</span> Score sync &mdash; 0 nearby</span>
+    <span id="nc-clock"></span>
+  </div>
+
+  <!-- Function keys -->
+  <div class="nc-fnbar">
+    <div class="nc-fnkey"><span class="n">1</span><span class="l">Help</span></div>
+    <div class="nc-fnkey"><span class="n">2</span><span class="l">Menu</span></div>
+    <div class="nc-fnkey"><span class="n">3</span><span class="l">View</span></div>
+    <div class="nc-fnkey"><span class="n">4</span><span class="l">Edit</span></div>
+    <div class="nc-fnkey"><span class="n">5</span><span class="l">Copy</span></div>
+    <div class="nc-fnkey"><span class="n">6</span><span class="l">Move</span></div>
+    <div class="nc-fnkey"><span class="n">7</span><span class="l">MkDir</span></div>
+    <div class="nc-fnkey"><span class="n">8</span><span class="l">Del</span></div>
+    <div class="nc-fnkey"><span class="n">9</span><span class="l">Menu</span></div>
+    <div class="nc-fnkey"><span class="n">10</span><span class="l">Quit</span></div>
+  </div>
 </div>
 
 <script>
+// ═══ GAMES LIST ═══
 const games = [
-  { name: "Naval Battle",     icon: "\u2693", desc: "Strategic sea combat",         year: "1990", file: "naval_battle.html", mode: "PvP" },
-  { name: "Missile Command",  icon: "\uD83D\uDE80", desc: "Defend your cities from ICBMs",  year: "1980", file: "missile_command.html", mode: "1P" },
-  { name: "Paratrooper",      icon: "\uD83C\uDF96", desc: "Shoot paratroopers from the sky", year: "1982", file: "paratrooper.html", mode: "1P" },
-  { name: "Pong",             icon: "\uD83C\uDFD3", desc: "The original video game",        year: "1972", file: "pong.html", mode: "PvP" },
-  { name: "Snake",            icon: "\uD83D\uDC0D", desc: "Nokia classic — eat and grow",   year: "1998", file: "snake.html", mode: "1P" },
-  { name: "Tetris",           icon: "\uD83D\uDFE6", desc: "Russian masterpiece",            year: "1984", file: "tetris.html", mode: "1P" },
-  { name: "Arkanoid",         icon: "\uD83E\uDDF1", desc: "Break all the bricks",           year: "1986", file: "arkanoid.html", mode: "1P" },
-  { name: "Minesweeper",      icon: "\uD83D\uDCA3", desc: "Think before you click",         year: "1990", file: "minesweeper.html", mode: "1P" },
+  { name: "NAVAL",    ext: "EXE", size: "847,296", date: "03-15-90", file: "naval_battle.html" },
+  { name: "MISSILE",  ext: "EXE", size: "128,512", date: "11-22-80", file: "missile_command.html" },
+  { name: "PARATRO",  ext: "EXE", size: "64,000",  date: "06-08-82", file: "paratrooper.html" },
+  { name: "PONG",     ext: "EXE", size: "16,384",  date: "01-01-72", file: "pong.html" },
+  { name: "SNAKE",    ext: "EXE", size: "32,768",  date: "09-12-98", file: "snake.html" },
+  { name: "TETRIS",   ext: "EXE", size: "49,152",  date: "06-06-84", file: "tetris.html" },
+  { name: "ARKANOID", ext: "EXE", size: "96,256",  date: "04-17-86", file: "arkanoid.html" },
+  { name: "MINESW",   ext: "EXE", size: "24,576",  date: "10-08-90", file: "minesweeper.html" },
 ];
 
-const list = document.getElementById('game-list');
+// ═══ C:\ ROOT (decorative) ═══
+const rootFiles = [
+  { name: "..",        ext: "",    size: "<DIR>",   date: "03-26-26", cls: "dir" },
+  { name: "DOS",       ext: "",    size: "<DIR>",   date: "01-15-94", cls: "dir" },
+  { name: "WINDOWS",   ext: "",    size: "<DIR>",   date: "05-20-95", cls: "dir" },
+  { name: "GAMES",     ext: "",    size: "<DIR>",   date: "03-26-26", cls: "dir" },
+  { name: "DRIVERS",   ext: "",    size: "<DIR>",   date: "02-10-94", cls: "dir" },
+  { name: "TEMP",      ext: "",    size: "<DIR>",   date: "03-26-26", cls: "dir" },
+  { name: "IO",        ext: "SYS", size: "40,566",  date: "09-30-93", cls: "sys" },
+  { name: "MSDOS",     ext: "SYS", size: "38,138",  date: "09-30-93", cls: "sys" },
+  { name: "COMMAND",   ext: "COM", size: "54,619",  date: "09-30-93", cls: "sys" },
+  { name: "CONFIG",    ext: "SYS", size: "256",     date: "03-20-26", cls: "sys" },
+  { name: "AUTOEXEC",  ext: "BAT", size: "512",     date: "03-20-26", cls: "sys" },
+  { name: "HIMEM",     ext: "SYS", size: "29,136",  date: "09-30-93", cls: "sys" },
+  { name: "EMM386",    ext: "EXE", size: "120,926", date: "09-30-93", cls: "sys" },
+  { name: "MOUSE",     ext: "COM", size: "56,408",  date: "07-01-93", cls: "sys" },
+];
 
-games.forEach((g, i) => {
-  const item = document.createElement('div');
-  item.className = 'game-item';
-  item.innerHTML = `
-    <span class="game-icon">${g.icon}</span>
-    <div class="game-info">
-      <div class="game-name">${g.name}</div>
-      <div class="game-desc">${g.desc}</div>
-    </div>
-    <span class="game-year">${g.year}</span>
-    <span class="game-mode ${g.mode === 'PvP' ? 'pvp' : ''}">${g.mode}</span>
-  `;
-  item.addEventListener('click', () => {
-    window.location.href = g.file;
+// ═══ DOS BOOT SEQUENCE ═══
+const bootLines = [
+  { text: "", delay: 200 },
+  { text: "AMIBIOS (C)1993 American Megatrends Inc.,", cls: "bios", delay: 50 },
+  { text: "BIOS Date: 03/26/26  Ver: 08.00.15", cls: "bios", delay: 50 },
+  { text: "", delay: 100 },
+  { text: "Main Processor : Intel 80486DX2-66 MHz", cls: "white", delay: 40 },
+  { text: "Numeric Processor : Present", cls: "bios", delay: 30 },
+  { text: "Floppy Drive A : 1.44M, 3.5 in.", cls: "bios", delay: 30 },
+  { text: "Hard Disk C: Type 47 — 504 MB", cls: "bios", delay: 30 },
+  { text: "Base Memory : 640K", cls: "bios", delay: 30 },
+  { text: "Extended Memory : 15360K", cls: "bios", delay: 30 },
+  { text: "", delay: 200 },
+  { text: "Starting MS-DOS...", cls: "white", delay: 400 },
+  { text: "", delay: 150 },
+  { text: "HIMEM.SYS is testing extended memory...done.", cls: "sys", delay: 200 },
+  { text: "DEVICE=C:\\DOS\\HIMEM.SYS", cls: "driver", delay: 100 },
+  { text: "DEVICE=C:\\DOS\\EMM386.EXE NOEMS", cls: "driver", delay: 100 },
+  { text: "DEVICE=C:\\DOS\\SETVER.EXE", cls: "driver", delay: 80 },
+  { text: "", delay: 100 },
+  { text: "C:\\DOS\\SMARTDRV.EXE /X", cls: "driver", delay: 80 },
+  { text: "Microsoft SMARTDrive Disk Cache version 5.02", cls: "bios", delay: 60 },
+  { text: "  Cache size: 2,097,152 bytes", cls: "bios", delay: 50 },
+  { text: "", delay: 100 },
+  { text: "C:\\DOS\\MSCDEX.EXE /D:MSCD001 /L:D", cls: "driver", delay: 80 },
+  { text: "MSCDEX Version 2.23  Drive D: = Driver MSCD001", cls: "bios", delay: 60 },
+  { text: "", delay: 100 },
+  { text: "C:\\MOUSE\\MOUSE.COM", cls: "driver", delay: 80 },
+  { text: "Mouse driver installed.", cls: "sys", delay: 60 },
+  { text: "", delay: 100 },
+  { text: "C:\\>", cls: "prompt", delay: 200 },
+  { text: "C:\\>CD GAMES", cls: "highlight", delay: 300 },
+  { text: "", delay: 100 },
+  { text: "C:\\GAMES>NC.EXE", cls: "highlight", delay: 400 },
+  { text: "", delay: 300 },
+];
+
+// ═══ BOOT ANIMATION ═══
+const bootEl = document.getElementById('boot-screen');
+let bootIndex = 0;
+
+function typeBoot() {
+  if (bootIndex >= bootLines.length) {
+    // Boot done — show NC
+    setTimeout(showNC, 200);
+    return;
+  }
+
+  const line = bootLines[bootIndex];
+  const span = document.createElement('span');
+  span.className = line.cls || '';
+  span.textContent = line.text + '\n';
+  bootEl.appendChild(span);
+  bootEl.scrollTop = bootEl.scrollHeight;
+  bootIndex++;
+  setTimeout(typeBoot, line.delay);
+}
+
+// ═══ SHOW NORTON COMMANDER ═══
+function showNC() {
+  bootEl.style.display = 'none';
+  const nc = document.getElementById('nc-screen');
+  nc.style.display = 'flex';
+
+  // Populate left panel (games)
+  const leftPanel = document.getElementById('left-panel');
+
+  // ".." directory entry
+  const dotdot = createFileRow({ name: "..", ext: "", size: "<DIR>", date: "03-26-26" }, "dir", null);
+  leftPanel.appendChild(dotdot);
+
+  games.forEach((g, i) => {
+    const row = createFileRow(g, "exe game", g.file);
+    if (i === 0) row.classList.add('selected');
+    leftPanel.appendChild(row);
   });
-  list.appendChild(item);
-});
 
-// Clock
+  // Populate right panel (C:\ root)
+  const rightPanel = document.getElementById('right-panel');
+  rootFiles.forEach(f => {
+    const row = createFileRow(f, f.cls || "", null);
+    rightPanel.appendChild(row);
+  });
+
+  // Clock
+  updateClock();
+  setInterval(updateClock, 30000);
+}
+
+function createFileRow(f, cls, clickFile) {
+  const row = document.createElement('div');
+  row.className = 'nc-file ' + cls;
+
+  const nameEl = document.createElement('span');
+  nameEl.className = 'fname';
+  nameEl.textContent = f.name;
+
+  const extEl = document.createElement('span');
+  extEl.className = 'fext';
+  extEl.textContent = f.ext ? '.' + f.ext : '';
+
+  const sizeEl = document.createElement('span');
+  sizeEl.className = 'fsize';
+  sizeEl.textContent = f.size;
+
+  const dateEl = document.createElement('span');
+  dateEl.className = 'fdate';
+  dateEl.textContent = f.date;
+
+  row.appendChild(nameEl);
+  row.appendChild(extEl);
+  row.appendChild(sizeEl);
+  row.appendChild(dateEl);
+
+  if (clickFile) {
+    row.addEventListener('click', () => {
+      // Brief "loading" effect
+      row.classList.add('selected');
+      setTimeout(() => {
+        window.location.href = clickFile;
+      }, 150);
+    });
+  }
+
+  return row;
+}
+
 function updateClock() {
   const now = new Date();
   const h = String(now.getHours()).padStart(2, '0');
   const m = String(now.getMinutes()).padStart(2, '0');
-  document.getElementById('clock').textContent = h + ':' + m;
+  const el = document.getElementById('nc-clock');
+  if (el) el.textContent = h + ':' + m;
 }
-updateClock();
-setInterval(updateClock, 10000);
+
+// ═══ START BOOT ═══
+// Small delay to feel like real boot
+setTimeout(typeBoot, 300);
 </script>
 </body></html>
