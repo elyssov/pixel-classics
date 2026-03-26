@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Snake</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #9bbc0f; overflow: hidden; touch-action: none; display: flex; align-items: center; justify-content: center; height: 100vh; }
+  canvas { display: block; image-rendering: pixelated; }
+</style>
+</head><body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// Nokia green palette
+const COLORS = {
+  bg: '#9bbc0f',
+  bgDark: '#8bac0f',
+  snake: '#0f380f',
+  food: '#306230',
+  text: '#0f380f',
+  grid: '#8bac0f'
+};
+
+const CELL = 20;
+let COLS, ROWS;
+let snake, dir, nextDir, food, score, gameOver, speed, lastMove;
+
+function resize() {
+  const maxW = window.innerWidth;
+  const maxH = window.innerHeight;
+  COLS = Math.floor(maxW / CELL);
+  ROWS = Math.floor(maxH / CELL);
+  canvas.width = COLS * CELL;
+  canvas.height = ROWS * CELL;
+}
+
+function init() {
+  resize();
+  const cx = Math.floor(COLS / 2);
+  const cy = Math.floor(ROWS / 2);
+  snake = [{x: cx, y: cy}, {x: cx - 1, y: cy}, {x: cx - 2, y: cy}];
+  dir = {x: 1, y: 0};
+  nextDir = {x: 1, y: 0};
+  score = 0;
+  gameOver = false;
+  speed = 120;
+  lastMove = 0;
+  placeFood();
+}
+
+function placeFood() {
+  do {
+    food = {
+      x: Math.floor(Math.random() * COLS),
+      y: Math.floor(Math.random() * ROWS)
+    };
+  } while (snake.some(s => s.x === food.x && s.y === food.y));
+}
+
+// Swipe controls
+let touchStart = null;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  touchStart = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+}, {passive: false});
+
+canvas.addEventListener('touchend', e => {
+  if (!touchStart) return;
+  const dx = e.changedTouches[0].clientX - touchStart.x;
+  const dy = e.changedTouches[0].clientY - touchStart.y;
+  if (Math.abs(dx) < 20 && Math.abs(dy) < 20) {
+    if (gameOver) { init(); return; }
+    return;
+  }
+  if (Math.abs(dx) > Math.abs(dy)) {
+    if (dx > 0 && dir.x !== -1) nextDir = {x: 1, y: 0};
+    else if (dx < 0 && dir.x !== 1) nextDir = {x: -1, y: 0};
+  } else {
+    if (dy > 0 && dir.y !== -1) nextDir = {x: 0, y: 1};
+    else if (dy < 0 && dir.y !== 1) nextDir = {x: 0, y: -1};
+  }
+}, {passive: false});
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (gameOver && e.key === ' ') { init(); return; }
+  switch(e.key) {
+    case 'ArrowUp': case 'w': if (dir.y !== 1) nextDir = {x: 0, y: -1}; break;
+    case 'ArrowDown': case 's': if (dir.y !== -1) nextDir = {x: 0, y: 1}; break;
+    case 'ArrowLeft': case 'a': if (dir.x !== 1) nextDir = {x: -1, y: 0}; break;
+    case 'ArrowRight': case 'd': if (dir.x !== -1) nextDir = {x: 1, y: 0}; break;
+  }
+});
+
+function update(ts) {
+  if (gameOver) return;
+  if (ts - lastMove < speed) return;
+  lastMove = ts;
+
+  dir = nextDir;
+  const head = {x: snake[0].x + dir.x, y: snake[0].y + dir.y};
+
+  // Wall collision
+  if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) {
+    gameOver = true; return;
+  }
+  // Self collision
+  if (snake.some(s => s.x === head.x && s.y === head.y)) {
+    gameOver = true; return;
+  }
+
+  snake.unshift(head);
+
+  if (head.x === food.x && head.y === food.y) {
+    score++;
+    if (speed > 60) speed -= 2;
+    placeFood();
+  } else {
+    snake.pop();
+  }
+}
+
+function draw() {
+  // Background
+  ctx.fillStyle = COLORS.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Grid
+  ctx.strokeStyle = COLORS.grid;
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x < COLS; x++) {
+    ctx.beginPath(); ctx.moveTo(x * CELL, 0); ctx.lineTo(x * CELL, canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y < ROWS; y++) {
+    ctx.beginPath(); ctx.moveTo(0, y * CELL); ctx.lineTo(canvas.width, y * CELL); ctx.stroke();
+  }
+
+  // Food
+  ctx.fillStyle = COLORS.food;
+  ctx.fillRect(food.x * CELL + 2, food.y * CELL + 2, CELL - 4, CELL - 4);
+
+  // Snake
+  ctx.fillStyle = COLORS.snake;
+  for (let i = 0; i < snake.length; i++) {
+    const s = snake[i];
+    const gap = i === 0 ? 1 : 2;
+    ctx.fillRect(s.x * CELL + gap, s.y * CELL + gap, CELL - gap * 2, CELL - gap * 2);
+  }
+
+  // Score
+  ctx.fillStyle = COLORS.text;
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('Score: ' + score, 8, 20);
+
+  // Game over
+  if (gameOver) {
+    ctx.fillStyle = 'rgba(155,188,15,0.85)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = COLORS.text;
+    ctx.font = 'bold 32px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 20);
+    ctx.font = '18px monospace';
+    ctx.fillText('Score: ' + score, canvas.width / 2, canvas.height / 2 + 15);
+    ctx.font = '14px monospace';
+    ctx.fillText('Tap to restart', canvas.width / 2, canvas.height / 2 + 45);
+  }
+}
+
+function loop(ts) {
+  update(ts);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+init();
+requestAnimationFrame(loop);
+</script>
+</body></html>

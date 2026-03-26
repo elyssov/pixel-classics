@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Paratrooper</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #87CEEB; overflow: hidden; touch-action: none; }
+  canvas { display: block; }
+</style>
+</head><body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+const W = () => canvas.width;
+const H = () => canvas.height;
+
+// Game objects
+let gunAngle = -Math.PI / 2; // straight up
+let bullets = [];
+let helicopters = [];
+let paratroopers = [];
+let landed = { left: 0, right: 0 };
+let score = 0;
+let gameOver = false;
+let spawnTimer = 0;
+let level = 1;
+
+const GUN_X = () => W() / 2;
+const GUN_Y = () => H() - 30;
+const GUN_LEN = 30;
+const BARREL_LEN = 25;
+
+function init() {
+  gunAngle = -Math.PI / 2;
+  bullets = [];
+  helicopters = [];
+  paratroopers = [];
+  landed = { left: 0, right: 0 };
+  score = 0;
+  gameOver = false;
+  spawnTimer = 0;
+  level = 1;
+}
+
+// Touch: tap anywhere to shoot toward that point
+canvas.addEventListener('click', e => {
+  if (gameOver) { init(); return; }
+  shoot(e.clientX, e.clientY);
+});
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (gameOver) { init(); return; }
+  shoot(e.touches[0].clientX, e.touches[0].clientY);
+}, {passive: false});
+
+function shoot(tx, ty) {
+  const dx = tx - GUN_X();
+  const dy = ty - GUN_Y();
+  gunAngle = Math.atan2(dy, dx);
+
+  // Clamp to upper hemisphere
+  if (gunAngle > -0.1) gunAngle = -0.1;
+  if (gunAngle < -Math.PI + 0.1) gunAngle = -Math.PI + 0.1;
+
+  const speed = 8;
+  bullets.push({
+    x: GUN_X() + Math.cos(gunAngle) * BARREL_LEN,
+    y: GUN_Y() + Math.sin(gunAngle) * BARREL_LEN,
+    vx: Math.cos(gunAngle) * speed,
+    vy: Math.sin(gunAngle) * speed
+  });
+}
+
+function spawnHelicopter() {
+  const fromLeft = Math.random() > 0.5;
+  helicopters.push({
+    x: fromLeft ? -60 : W() + 60,
+    y: 30 + Math.random() * 60,
+    vx: (fromLeft ? 1 : -1) * (1.5 + level * 0.3),
+    dropTimer: 60 + Math.random() * 40,
+    dropped: false
+  });
+}
+
+function update() {
+  if (gameOver) return;
+
+  // Spawn
+  spawnTimer++;
+  if (spawnTimer >= Math.max(60, 120 - level * 10)) {
+    spawnTimer = 0;
+    spawnHelicopter();
+  }
+
+  // Helicopters
+  for (let i = helicopters.length - 1; i >= 0; i--) {
+    const h = helicopters[i];
+    h.x += h.vx;
+    h.dropTimer--;
+
+    // Drop paratrooper
+    if (h.dropTimer <= 0 && !h.dropped && h.x > 50 && h.x < W() - 50) {
+      h.dropped = true;
+      paratroopers.push({
+        x: h.x, y: h.y + 15,
+        vy: 0.5 + Math.random() * 0.5,
+        chute: true,
+        landed: false
+      });
+    }
+
+    // Remove if off screen
+    if ((h.vx > 0 && h.x > W() + 100) || (h.vx < 0 && h.x < -100)) {
+      helicopters.splice(i, 1);
+    }
+  }
+
+  // Paratroopers
+  for (let i = paratroopers.length - 1; i >= 0; i--) {
+    const p = paratroopers[i];
+    if (!p.landed) {
+      p.y += p.chute ? p.vy : p.vy * 4;
+
+      if (p.y >= H() - 25) {
+        p.y = H() - 25;
+        p.landed = true;
+        // Count which side
+        if (p.x < GUN_X()) landed.left++;
+        else landed.right++;
+
+        // Game over: 4 on either side
+        if (landed.left >= 4 || landed.right >= 4) {
+          gameOver = true;
+        }
+      }
+    }
+  }
+
+  // Bullets
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.x += b.vx;
+    b.y += b.vy;
+
+    // Off screen
+    if (b.x < 0 || b.x > W() || b.y < 0 || b.y > H()) {
+      bullets.splice(i, 1);
+      continue;
+    }
+
+    // Hit helicopter?
+    let hit = false;
+    for (let j = helicopters.length - 1; j >= 0; j--) {
+      const h = helicopters[j];
+      if (Math.abs(b.x - h.x) < 30 && Math.abs(b.y - h.y) < 15) {
+        helicopters.splice(j, 1);
+        bullets.splice(i, 1);
+        score += 20;
+        hit = true;
+        break;
+      }
+    }
+    if (hit) continue;
+
+    // Hit paratrooper?
+    for (let j = paratroopers.length - 1; j >= 0; j--) {
+      const p = paratroopers[j];
+      if (!p.landed && Math.abs(b.x - p.x) < 10 && Math.abs(b.y - p.y) < 12) {
+        if (p.chute) {
+          // Shoot chute — trooper falls fast
+          p.chute = false;
+          p.vy = 3;
+          score += 5;
+        } else {
+          paratroopers.splice(j, 1);
+          score += 10;
+        }
+        bullets.splice(i, 1);
+        break;
+      }
+    }
+  }
+
+  // Level up
+  level = Math.floor(score / 100) + 1;
+}
+
+function draw() {
+  // Sky gradient
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, H());
+  skyGrad.addColorStop(0, '#1a237e');
+  skyGrad.addColorStop(0.5, '#42a5f5');
+  skyGrad.addColorStop(1, '#81d4fa');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W(), H());
+
+  // Ground
+  ctx.fillStyle = '#4caf50';
+  ctx.fillRect(0, H() - 20, W(), 20);
+
+  // Gun base
+  ctx.fillStyle = '#455a64';
+  ctx.beginPath();
+  ctx.arc(GUN_X(), GUN_Y(), 15, Math.PI, 0);
+  ctx.fill();
+  ctx.fillRect(GUN_X() - 20, GUN_Y(), 40, 10);
+
+  // Barrel
+  ctx.strokeStyle = '#37474f';
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(GUN_X(), GUN_Y());
+  ctx.lineTo(
+    GUN_X() + Math.cos(gunAngle) * BARREL_LEN,
+    GUN_Y() + Math.sin(gunAngle) * BARREL_LEN
+  );
+  ctx.stroke();
+
+  // Helicopters
+  for (const h of helicopters) {
+    ctx.fillStyle = '#37474f';
+    // Body
+    ctx.beginPath();
+    ctx.ellipse(h.x, h.y, 25, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Tail
+    ctx.fillRect(h.vx > 0 ? h.x - 35 : h.x + 15, h.y - 3, 20, 6);
+    // Rotor
+    ctx.strokeStyle = '#546e7a';
+    ctx.lineWidth = 2;
+    const rotorW = 30 * Math.sin(Date.now() / 30); // spinning effect
+    ctx.beginPath();
+    ctx.moveTo(h.x - rotorW, h.y - 12);
+    ctx.lineTo(h.x + rotorW, h.y - 12);
+    ctx.stroke();
+  }
+
+  // Paratroopers
+  for (const p of paratroopers) {
+    if (p.chute) {
+      // Parachute
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 15, 12, Math.PI, 0);
+      ctx.fill();
+      ctx.strokeStyle = '#999';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(p.x - 12, p.y - 15); ctx.lineTo(p.x, p.y);
+      ctx.moveTo(p.x + 12, p.y - 15); ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+    // Body
+    ctx.fillStyle = p.landed ? '#c62828' : '#e53935';
+    ctx.fillRect(p.x - 3, p.y - 5, 6, 12);
+    // Head
+    ctx.beginPath();
+    ctx.arc(p.x, p.y - 8, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Bullets
+  ctx.fillStyle = '#ffeb3b';
+  for (const b of bullets) {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Landed count indicators
+  ctx.fillStyle = '#c62828';
+  ctx.font = 'bold 14px monospace';
+  ctx.textAlign = 'center';
+  if (landed.left > 0) ctx.fillText(landed.left + '/4', GUN_X() - 60, H() - 5);
+  if (landed.right > 0) ctx.fillText(landed.right + '/4', GUN_X() + 60, H() - 5);
+
+  // HUD
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 18px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('SCORE: ' + score, 10, 25);
+  ctx.textAlign = 'right';
+  ctx.fillText('LEVEL: ' + level, W() - 10, 25);
+
+  // Game over
+  if (gameOver) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W(), H());
+    ctx.fillStyle = '#ff3333';
+    ctx.font = 'bold 36px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('GAME OVER', W() / 2, H() / 2 - 20);
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px monospace';
+    ctx.fillText('Score: ' + score, W() / 2, H() / 2 + 15);
+    ctx.font = '14px monospace';
+    ctx.fillStyle = '#999';
+    ctx.fillText('Tap to restart', W() / 2, H() / 2 + 45);
+  }
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+init();
+loop();
+</script>
+</body></html>
