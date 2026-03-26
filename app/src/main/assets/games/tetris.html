@@ -10,6 +10,7 @@
 </style>
 </head><body>
 <canvas id="c"></canvas>
+<script src="sound.js"></script>
 <script src="loader.js"></script>
 <script>
 const canvas = document.getElementById('c');
@@ -38,12 +39,13 @@ const PIECES = [
   { shape: [[1,1,0],[0,1,1]], color: '#FF0000' },      // Z
 ];
 
-let board, piece, pieceX, pieceY, nextPiece, score, lines, level, gameOver, dropTimer, dropInterval;
+let board, piece, pieceX, pieceY, nextPiece, score, lines, level, gameOver, dropTimer, dropInterval, lockTimer, lockDelay;
 
 function init() {
   board = Array.from({length: ROWS}, () => Array(COLS).fill(null));
   score = 0; lines = 0; level = 1; gameOver = false;
-  dropTimer = 0; dropInterval = 50;
+  dropTimer = 0; dropInterval = 45; // ~750ms at 60fps
+  lockTimer = 0; lockDelay = 30; // 500ms lock delay
   spawnPiece();
   nextPiece = randomPiece();
 }
@@ -99,8 +101,14 @@ function clearLines() {
     const pts = [0, 100, 300, 500, 800];
     score += (pts[cleared] || 800) * level;
     lines += cleared;
+    const oldLevel = level;
     level = Math.floor(lines / 10) + 1;
-    dropInterval = Math.max(5, 50 - level * 4);
+    // NES-style speed curve: starts slow, gets fast gradually
+    dropInterval = Math.max(3, 45 - (level - 1) * 3);
+    if (typeof SFX !== 'undefined') {
+      if (cleared === 4) SFX.tetris(); else SFX.lineClear();
+      if (level > oldLevel) SFX.levelUp();
+    }
   }
 }
 
@@ -116,30 +124,45 @@ function rotate(shape) {
 }
 
 function move(dx) {
-  if (!collides(piece.shape, pieceX + dx, pieceY)) pieceX += dx;
+  if (!collides(piece.shape, pieceX + dx, pieceY)) {
+    pieceX += dx;
+    lockTimer = 0; // reset lock on move
+    if (typeof SFX !== 'undefined') SFX.move();
+  }
 }
 
 function drop() {
   if (!collides(piece.shape, pieceX, pieceY + 1)) {
     pieceY++;
+    lockTimer = 0; // reset lock delay on successful drop
   } else {
-    lock();
+    lockTimer++;
+    if (lockTimer >= lockDelay) {
+      lock();
+      lockTimer = 0;
+    }
   }
 }
 
 function hardDrop() {
   while (!collides(piece.shape, pieceX, pieceY + 1)) pieceY++;
   lock();
+  if (typeof SFX !== 'undefined') SFX.drop();
 }
 
 function rotatePiece() {
   const rotated = rotate(piece.shape);
-  if (!collides(rotated, pieceX, pieceY)) {
-    piece.shape = rotated;
-  } else if (!collides(rotated, pieceX - 1, pieceY)) {
-    piece.shape = rotated; pieceX--;
-  } else if (!collides(rotated, pieceX + 1, pieceY)) {
-    piece.shape = rotated; pieceX++;
+  // Wall kick: try center, left, right, up
+  const kicks = [[0,0],[-1,0],[1,0],[0,-1],[-1,-1],[1,-1]];
+  for (const [kx,ky] of kicks) {
+    if (!collides(rotated, pieceX + kx, pieceY + ky)) {
+      piece.shape = rotated;
+      pieceX += kx;
+      pieceY += ky;
+      lockTimer = 0;
+      if (typeof SFX !== 'undefined') SFX.rotate();
+      break;
+    }
   }
 }
 

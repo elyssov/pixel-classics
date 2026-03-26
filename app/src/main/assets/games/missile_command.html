@@ -10,6 +10,7 @@
 </style>
 </head><body>
 <canvas id="c"></canvas>
+<script src="sound.js"></script>
 <script src="loader.js"></script>
 <script>
 const canvas = document.getElementById('c');
@@ -252,6 +253,7 @@ function update() {
     if (dx * dx + dy * dy < 80) {
       addExplosion(r.targetX, r.targetY, 50, EXPLOSION_MID);
       rockets.splice(i, 1);
+      if (typeof SFX !== 'undefined') SFX.bigExplosion();
     }
   }
 

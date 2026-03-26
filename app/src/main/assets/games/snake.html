@@ -10,6 +10,7 @@
 </style>
 </head><body>
 <canvas id="c"></canvas>
+<script src="sound.js"></script>
 <script src="loader.js"></script>
 <script>
 const canvas = document.getElementById('c');
@@ -47,7 +48,7 @@ function init() {
   nextDir = {x: 1, y: 0};
   score = 0;
   gameOver = false;
-  speed = 120;
+  speed = 100; // smoother start
   lastMove = 0;
   placeFood();
 }
@@ -106,19 +107,20 @@ function update(ts) {
 
   // Wall collision
   if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) {
-    gameOver = true; return;
+    gameOver = true; if (typeof SFX !== 'undefined') SFX.die(); return;
   }
   // Self collision
   if (snake.some(s => s.x === head.x && s.y === head.y)) {
-    gameOver = true; return;
+    gameOver = true; if (typeof SFX !== 'undefined') SFX.die(); return;
   }
 
   snake.unshift(head);
 
   if (head.x === food.x && head.y === food.y) {
     score++;
-    if (speed > 60) speed -= 2;
+    if (speed > 55) speed -= 1; // gentler progression
     placeFood();
+    if (typeof SFX !== 'undefined') SFX.eat();
   } else {
     snake.pop();
   }

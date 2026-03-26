@@ -10,6 +10,7 @@
 </style>
 </head><body>
 <canvas id="c"></canvas>
+<script src="sound.js"></script>
 <script src="loader.js"></script>
 <script>
 const canvas = document.getElementById('c');
@@ -71,11 +72,15 @@ function update() {
     state.p1.y += (target - state.p1.y) * 0.15;
   }
 
-  // AI paddle
-  const aiSpeed = 3.5;
+  // AI paddle — beatable but challenging
+  const aiSpeed = 2.5;
   const diff = b.y - state.p2.y;
-  if (Math.abs(diff) > 10) {
-    state.p2.y += Math.sign(diff) * Math.min(aiSpeed, Math.abs(diff));
+  // AI has reaction delay — only tracks when ball is on its half
+  if (b.x > W() * 0.35 && Math.abs(diff) > 15) {
+    // AI sometimes misjudges (5% chance to hesitate)
+    if (Math.random() > 0.05) {
+      state.p2.y += Math.sign(diff) * Math.min(aiSpeed, Math.abs(diff) * 0.08);
+    }
   }
 
   // Clamp paddles
@@ -95,8 +100,13 @@ function update() {
   if (b.x - b.r < lx && b.x - b.r > state.margin &&
       b.y > state.p1.y - ph && b.y < state.p1.y + ph) {
     b.x = lx + b.r;
-    b.vx = Math.abs(b.vx) * 1.05;
-    b.vy += (b.y - state.p1.y) / ph * 3;
+    const hitPos = (b.y - state.p1.y) / ph;
+    const angle = hitPos * Math.PI / 4;
+    const spd = Math.min(Math.sqrt(b.vx*b.vx + b.vy*b.vy) + 0.2, 9);
+    b.vx = Math.cos(angle) * spd;
+    b.vy = Math.sin(angle) * spd;
+    if (b.vx < 1) b.vx = 1;
+    if (typeof SFX !== 'undefined') SFX.paddleHit();
   }
 
   // Right paddle collision
@@ -104,21 +114,20 @@ function update() {
   if (b.x + b.r > rx && b.x + b.r < W - state.margin &&
       b.y > state.p2.y - ph && b.y < state.p2.y + ph) {
     b.x = rx - b.r;
-    b.vx = -Math.abs(b.vx) * 1.05;
-    b.vy += (b.y - state.p2.y) / ph * 3;
+    const hitPos = (b.y - state.p2.y) / ph;
+    const angle = Math.PI - hitPos * Math.PI / 4;
+    const spd = Math.min(Math.sqrt(b.vx*b.vx + b.vy*b.vy) + 0.2, 9);
+    b.vx = -Math.abs(Math.cos(angle) * spd);
+    b.vy = Math.sin(angle) * spd;
+    if (typeof SFX !== 'undefined') SFX.paddleHit();
   }
 
-  // Speed cap
-  const maxSpeed = 12;
-  const spd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-  if (spd > maxSpeed) {
-    b.vx = b.vx / spd * maxSpeed;
-    b.vy = b.vy / spd * maxSpeed;
-  }
+  // Top/bottom bounce sound
+  if ((b.y - b.r <= 0 || b.y + b.r >= H) && typeof SFX !== 'undefined') SFX.wallHit();
 
   // Score
-  if (b.x < 0) { state.p2.score++; resetBall(1); }
-  if (b.x > W) { state.p1.score++; resetBall(-1); }
+  if (b.x < 0) { state.p2.score++; resetBall(1); if (typeof SFX !== 'undefined') SFX.score(); }
+  if (b.x > W) { state.p1.score++; resetBall(-1); if (typeof SFX !== 'undefined') SFX.score(); }
 }
 
 function draw() {

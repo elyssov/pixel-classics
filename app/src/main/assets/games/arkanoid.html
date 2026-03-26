@@ -10,6 +10,7 @@
 </style>
 </head><body>
 <canvas id="c"></canvas>
+<script src="sound.js"></script>
 <script src="loader.js"></script>
 <script>
 const canvas = document.getElementById('c');
@@ -136,11 +137,11 @@ function update() {
   if (ball.vy > 0 && ball.y + ball.r >= py && ball.y + ball.r <= py + paddle.h &&
       ball.x >= paddle.x - hw && ball.x <= paddle.x + hw) {
     ball.y = py - ball.r;
-    // Angle depends on where ball hit paddle
     const hitPos = (ball.x - paddle.x) / hw; // -1 to 1
-    const angle = hitPos * Math.PI / 3 - Math.PI / 2;
+    const angle = hitPos * Math.PI * 0.4 - Math.PI / 2; // wider 72° range
     const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
-    const newSpeed = Math.min(speed * 1.01, 10);
+    const newSpeed = Math.min(speed * 1.005, 8); // gentler acceleration
+    if (typeof SFX !== 'undefined') SFX.paddleBounce();
     ball.vx = Math.cos(angle) * newSpeed;
     ball.vy = Math.sin(angle) * newSpeed;
   }
@@ -156,10 +157,11 @@ function update() {
       if (brick.hits <= 0) {
         brick.alive = false;
         score += 10;
+        if (typeof SFX !== 'undefined') SFX.brickBreak();
       } else {
-        // Dim the color for damaged bricks
         brick.color = dimColor(brick.color);
         score += 5;
+        if (typeof SFX !== 'undefined') SFX.brickHit();
       }
 
       // Determine bounce direction

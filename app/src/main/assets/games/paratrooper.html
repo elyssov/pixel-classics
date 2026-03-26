@@ -10,6 +10,7 @@
 </style>
 </head><body>
 <canvas id="c"></canvas>
+<script src="sound.js"></script>
 <script src="loader.js"></script>
 <script>
 const canvas = document.getElementById('c');
@@ -77,6 +78,7 @@ function shoot(tx, ty) {
     vx: Math.cos(gunAngle) * speed,
     vy: Math.sin(gunAngle) * speed
   });
+  if (typeof SFX !== 'undefined') SFX.shoot();
 }
 
 function spawnHelicopter() {
