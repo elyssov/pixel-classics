@@ -560,10 +560,19 @@ const bootLines = [
 const bootEl = document.getElementById('boot-screen');
 let bootIndex = 0;
 
+// Start FOTA fetch immediately during DOS boot
+startFotaCheck();
+
 function typeBoot() {
   if (bootIndex >= bootLines.length) {
-    // Boot done — show NC
-    setTimeout(showNC, 200);
+    // Boot done — show update screen if available, else go to NC
+    setTimeout(() => {
+      if (fotaResult) {
+        showDosUpdateScreen(fotaResult).then(showNC);
+      } else {
+        showNC();
+      }
+    }, 200);
     return;
   }
 
@@ -716,20 +725,23 @@ function updateClock() {
 }
 
 // ═══ FOTA — Over-the-Air Update from GitHub Releases ═══
-const CURRENT_VERSION = '3.0';
-const CURRENT_BUILD = 7;
+const CURRENT_VERSION = '3.1';
+const CURRENT_BUILD = 8;
 const GITHUB_REPO = 'elyssov/pixel-classics';
+
+// FOTA result stored here by the fetch started during DOS boot
+let fotaResult = null; // { version, url, sizeMB } or null
 
 function checkForUpdate() {
   const dismissed = localStorage.getItem('pc_update_dismissed');
-  if (dismissed === String(CURRENT_BUILD)) return; // already dismissed this version
+  if (dismissed === String(CURRENT_BUILD)) return Promise.resolve(null);
 
-  fetch('https://api.github.com/repos/' + GITHUB_REPO + '/releases/latest', {
+  return fetch('https://api.github.com/repos/' + GITHUB_REPO + '/releases/latest', {
     cache: 'no-cache'
   })
   .then(r => r.json())
   .then(release => {
-    if (!release.tag_name) return;
+    if (!release.tag_name) return null;
     const remoteVer = release.tag_name.replace(/^v/, '');
 
     // Find APK asset
@@ -742,44 +754,56 @@ function checkForUpdate() {
       }
     }
 
-    // Extract build number from version or compare strings
     if (remoteVer !== CURRENT_VERSION && apkUrl) {
-      showUpdateBanner(remoteVer, apkUrl, Math.round(apkSize / 1048576));
+      return { version: remoteVer, url: apkUrl, sizeMB: Math.round(apkSize / 1048576) };
     }
+    return null;
   })
-  .catch(() => {}); // silently fail if no internet
+  .catch(() => null);
 }
 
-function showUpdateBanner(version, url, sizeMB) {
-  // Create NC-style update bar above status
-  let bar = document.getElementById('update-bar');
-  if (bar) bar.remove();
-  bar = document.createElement('div');
-  bar.id = 'update-bar';
-  bar.style.cssText = 'background:#000;color:#55FF55;padding:4px 8px;font-size:11px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;flex-shrink:0;';
-  bar.innerHTML = '<span>\u2191 Update available: v' + version + ' (' + sizeMB + ' MB)</span>' +
-    '<span style="display:flex;gap:8px;">' +
-    '<span id="update-install" style="color:#FFFF55;cursor:pointer;">[Install]</span>' +
-    '<span id="update-dismiss" style="color:#AA0000;cursor:pointer;">[Later]</span>' +
-    '</span>';
+// Show DOS-style update screen before NC
+function showDosUpdateScreen(update) {
+  return new Promise(resolve => {
+    const bootEl = document.getElementById('boot-screen');
+    bootEl.innerHTML = '';
+    bootEl.style.display = 'flex';
+    bootEl.style.flexDirection = 'column';
+    bootEl.style.justifyContent = 'center';
+    bootEl.style.alignItems = 'center';
+    bootEl.style.fontFamily = 'monospace';
+    bootEl.style.color = '#AAA';
 
-  const nc = document.getElementById('nc-screen');
-  const fnbar = nc.querySelector('.nc-fnbar');
-  nc.insertBefore(bar, fnbar);
+    const box = document.createElement('div');
+    box.style.cssText = 'text-align:center;padding:20px;';
+    box.innerHTML =
+      '<div style="color:#FFF;font-size:16px;margin-bottom:16px;">UPDATE AVAILABLE</div>' +
+      '<div style="color:#AAA;margin-bottom:24px;">New version: v' + update.version + ' (' + update.sizeMB + ' MB)</div>' +
+      '<div style="display:flex;justify-content:center;gap:24px;">' +
+        '<span id="fota-install" style="color:#55FF55;cursor:pointer;padding:4px 16px;border:1px solid #55FF55;">[Install]</span>' +
+        '<span id="fota-skip" style="color:#AAA;cursor:pointer;padding:4px 16px;border:1px solid #555;">[Skip]</span>' +
+      '</div>';
+    bootEl.appendChild(box);
 
-  document.getElementById('update-install').addEventListener('click', (e) => {
-    e.stopPropagation();
-    window.open(url, '_blank');
-  });
-  document.getElementById('update-dismiss').addEventListener('click', (e) => {
-    e.stopPropagation();
-    localStorage.setItem('pc_update_dismissed', String(CURRENT_BUILD));
-    bar.remove();
+    document.getElementById('fota-install').addEventListener('click', () => {
+      window.open(update.url, '_blank');
+      // After opening download, continue to NC
+      resolve();
+    });
+    document.getElementById('fota-skip').addEventListener('click', () => {
+      localStorage.setItem('pc_update_dismissed', String(CURRENT_BUILD));
+      resolve();
+    });
   });
 }
 
-// Check for updates 3 seconds after NC loads
-setTimeout(checkForUpdate, 3000);
+// Start FOTA fetch immediately during boot (called from boot init)
+function startFotaCheck() {
+  const p = checkForUpdate();
+  if (p && p.then) {
+    p.then(result => { fotaResult = result; });
+  }
+}
 
 // ═══ GAME LAUNCHER ═══
 function launchGame(name, ext, size, file) {
