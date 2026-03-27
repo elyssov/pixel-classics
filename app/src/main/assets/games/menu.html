@@ -67,6 +67,78 @@
   #game-loader .bar-fill {
     color: #FFF;
   }
+
+  /* ═══════════════════════════════
+     DONATE / ABOUT OVERLAY
+     ═══════════════════════════════ */
+  #donate-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 99998;
+    background: #0000AA;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  #donate-overlay .donate-box {
+    border: 2px solid #00AAAA;
+    background: #0000AA;
+    padding: 12px 20px;
+    max-width: 520px;
+    width: 90%;
+    color: #AAA;
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  #donate-overlay .donate-title {
+    text-align: center;
+    color: #FFFF55;
+    font-weight: bold;
+    font-size: 14px;
+    letter-spacing: 2px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #00AAAA;
+    padding-bottom: 6px;
+  }
+  #donate-overlay .donate-label { color: #00AAAA; }
+  #donate-overlay .donate-val { color: #FFFFFF; }
+  #donate-overlay .donate-qr {
+    display: block;
+    width: 160px;
+    height: auto;
+    margin: 10px auto;
+    image-rendering: pixelated;
+    border: 2px solid #00AAAA;
+  }
+  #donate-overlay .donate-note {
+    color: #55FF55;
+    font-size: 11px;
+    text-align: center;
+    margin-top: 8px;
+  }
+  #donate-overlay .donate-cc {
+    color: #555;
+    font-size: 10px;
+    text-align: center;
+    margin-top: 8px;
+  }
+  #donate-overlay .donate-close {
+    display: block;
+    margin: 10px auto 0;
+    background: #000;
+    color: #00AAAA;
+    border: 1px solid #00AAAA;
+    padding: 4px 20px;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  #donate-overlay .donate-close:hover {
+    background: #00AAAA;
+    color: #000;
+  }
+
   #boot-screen .cursor {
     display: inline-block;
     width: 8px; height: 14px;
@@ -257,6 +329,24 @@
 <!-- ═══ Game Loading Screen ═══ -->
 <div id="game-loader"></div>
 
+<!-- ═══ Donate / About Overlay ═══ -->
+<div id="donate-overlay" onclick="if(event.target===this)hideDonate()">
+  <div class="donate-box">
+    <div class="donate-title">SUPPORT THE AUTHOR</div>
+    <span class="donate-label">Beneficiary:</span> <span class="donate-val">LISOVSKII EVGENII</span><br>
+    <span class="donate-label">Account:</span> <span class="donate-val">1051678656</span><br>
+    <span class="donate-label">Bank:</span> <span class="donate-val">Vietcombank (JSCB for Foreign Trade of Vietnam)</span><br>
+    <span class="donate-label">SWIFT/BIC:</span> <span class="donate-val">BFTVVNVX006</span><br>
+    <span class="donate-label">Branch:</span> <span class="donate-val">KHANH HOA BRANCH</span><br>
+    <span class="donate-label">Address:</span> <span class="donate-val">17 Quang Trung, Nha Trang, Khanh Hoa, Vietnam</span><br>
+    <span class="donate-label">Purpose:</span> <span class="donate-val">Charitable donation</span>
+    <img class="donate-qr" id="donate-qr-img" src="qr.png" alt="QR Vietcombank">
+    <div class="donate-note">If you enjoy the games — consider buying the developer a coffee.</div>
+    <div class="donate-cc">Creative Commons BY-NC-SA 4.0 | Pixel Classics 2026</div>
+    <button class="donate-close" onclick="hideDonate()">[ Close ]</button>
+  </div>
+</div>
+
 <!-- ═══ Norton Commander ═══ -->
 <div id="nc-screen">
 
@@ -295,7 +385,7 @@
 
   <!-- Function keys -->
   <div class="nc-fnbar">
-    <div class="nc-fnkey"><span class="n">1</span><span class="l">Help</span></div>
+    <div class="nc-fnkey" onclick="showDonate()" style="cursor:pointer"><span class="n">1</span><span class="l">Help</span></div>
     <div class="nc-fnkey"><span class="n">2</span><span class="l">Menu</span></div>
     <div class="nc-fnkey"><span class="n">3</span><span class="l">View</span></div>
     <div class="nc-fnkey"><span class="n">4</span><span class="l">Edit</span></div>
@@ -554,6 +644,14 @@ function launchGame(name, ext, size, file) {
   }
 
   setTimeout(typeLoader, 100);
+}
+
+// ═══ DONATE ═══
+function showDonate() {
+  document.getElementById('donate-overlay').style.display = 'flex';
+}
+function hideDonate() {
+  document.getElementById('donate-overlay').style.display = 'none';
 }
 
 // ═══ POST BEEP ═══
