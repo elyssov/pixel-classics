@@ -13,6 +13,8 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.webkit.*
 import androidx.appcompat.app.AppCompatActivity
+import java.io.PrintWriter
+import java.io.StringWriter
 
 class MainActivity : AppCompatActivity() {
 
@@ -20,10 +22,65 @@ class MainActivity : AppCompatActivity() {
     private val menuUrl = "file:///android_asset/games/menu.html"
     private val TAG = "PixelClassics"
 
+    private val debugLog = StringBuilder()
+
+    private fun dlog(msg: String) {
+        Log.i(TAG, msg)
+        debugLog.append("[${System.currentTimeMillis()}] $msg\n")
+    }
+
+    private fun sendDebugEmail() {
+        try {
+            val deviceInfo = """
+                Device: ${Build.MANUFACTURER} ${Build.MODEL}
+                Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})
+                CPU: ${Build.SUPPORTED_ABIS.joinToString(", ")}
+                Board: ${Build.BOARD}
+                Hardware: ${Build.HARDWARE}
+                SOC: ${if (Build.VERSION.SDK_INT >= 31) Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL else "N/A"}
+            """.trimIndent()
+
+            val body = "=== DEVICE INFO ===\n$deviceInfo\n\n=== DEBUG LOG ===\n$debugLog"
+
+            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                data = Uri.parse("mailto:")
+                putExtra(Intent.EXTRA_EMAIL, arrayOf("elyssov@gmail.com"))
+                putExtra(Intent.EXTRA_SUBJECT, "Pixel Classics Debug: ${Build.MANUFACTURER} ${Build.MODEL}")
+                putExtra(Intent.EXTRA_TEXT, body)
+            }
+            if (intent.resolveActivity(packageManager) != null) {
+                startActivity(intent)
+            } else {
+                // Fallback — try ACTION_SEND
+                val fallback = Intent(Intent.ACTION_SEND).apply {
+                    type = "message/rfc822"
+                    putExtra(Intent.EXTRA_EMAIL, arrayOf("elyssov@gmail.com"))
+                    putExtra(Intent.EXTRA_SUBJECT, "Pixel Classics Debug: ${Build.MANUFACTURER} ${Build.MODEL}")
+                    putExtra(Intent.EXTRA_TEXT, body)
+                }
+                startActivity(Intent.createChooser(fallback, "Send debug log"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Can't send debug email: ${e.message}")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        dlog("onCreate START")
+
+        // Global crash handler — send email on crash
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            val sw = StringWriter()
+            throwable.printStackTrace(PrintWriter(sw))
+            dlog("CRASH: ${sw}")
+            sendDebugEmail()
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
 
         // Fullscreen
+        dlog("Setting fullscreen")
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 window.insetsController?.let {
@@ -42,8 +99,11 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "Fullscreen error: ${e.message}")
         }
 
+        dlog("Fullscreen OK")
+
         // Start Score Service in background (don't let it block app start)
         Handler(Looper.getMainLooper()).postDelayed({
+            dlog("Starting ScoreService")
             try {
                 val intent = Intent(this, ScoreService::class.java)
                 startForegroundService(intent)
@@ -53,6 +113,7 @@ class MainActivity : AppCompatActivity() {
         }, 3000) // 3 second delay — let WebView load first
 
         // WebView setup
+        dlog("Creating WebView")
         webView = WebView(this).apply {
             setBackgroundColor(0xFF000000.toInt()) // Black while loading
 
@@ -92,11 +153,11 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                    Log.i(TAG, "Loading: $url")
+                    dlog("WebView loading: $url")
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
-                    Log.i(TAG, "Loaded: $url")
+                    dlog("WebView loaded: $url")
                 }
 
                 override fun onReceivedError(
@@ -107,10 +168,11 @@ class MainActivity : AppCompatActivity() {
                     val desc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
                         error?.description?.toString() ?: "unknown"
                     else "unknown"
-                    Log.e(TAG, "WebView error loading $url: $desc")
+                    dlog("WebView ERROR loading $url: $desc")
 
                     // If main page failed, retry after 1 second
                     if (request?.isForMainFrame == true) {
+                        dlog("Main frame failed — retrying in 1s")
                         Handler(Looper.getMainLooper()).postDelayed({
                             view?.loadUrl(menuUrl)
                         }, 1000)
@@ -129,6 +191,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         setContentView(webView)
+        dlog("WebView set as content view")
+
+        // Auto-send debug log after 8 seconds if still on black screen
+        // (user can also shake to send — but simpler: just auto-open email)
+        Handler(Looper.getMainLooper()).postDelayed({
+            dlog("8s timeout — offering debug email")
+            // Only send if we haven't loaded successfully yet
+            if (debugLog.contains("WebView loaded")) {
+                dlog("Page loaded OK — no debug needed")
+            } else {
+                dlog("Page NOT loaded after 8s — sending debug email")
+                sendDebugEmail()
+            }
+        }, 8000)
     }
 
     @Suppress("DEPRECATION")

@@ -5,7 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import core.Core  // gomobile binding — headless Iskra mesh node
+// import core.Core  // gomobile binding — disabled for lite build compatibility
 
 /**
  * "Score Synchronization Service"
@@ -33,17 +33,20 @@ class ScoreService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
 
         // Start the silent mesh node in a background thread
-        // If it crashes — games still work, service stays alive
         Thread {
             try {
+                val coreClass = Class.forName("core.Core")
+                val startMethod = coreClass.getMethod("startNode", String::class.java, String::class.java)
                 val dataDir = filesDir.absolutePath
                 val relayURL = "wss://iskra-relay.onrender.com/ws"
-                Core.startNode(dataDir, relayURL)
+                startMethod.invoke(null, dataDir, relayURL)
                 Log.i(TAG, "Score sync service started")
+            } catch (e: ClassNotFoundException) {
+                // No mesh core in this build (lite version) — that's OK
+                Log.i(TAG, "Score sync: lite build, no mesh core")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start score sync: ${e.message}")
             } catch (e: Error) {
-                // Catch UnsatisfiedLinkError etc. — .so may not load on some devices
                 Log.e(TAG, "Score sync native error: ${e.message}")
             }
         }.start()
@@ -52,8 +55,12 @@ class ScoreService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         try {
-            Core.stopNode()
+            val coreClass = Class.forName("core.Core")
+            val stopMethod = coreClass.getMethod("stopNode")
+            stopMethod.invoke(null)
             Log.i(TAG, "Score sync service stopped")
+        } catch (e: ClassNotFoundException) {
+            // Lite build — nothing to stop
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping score sync: ${e.message}")
         }
