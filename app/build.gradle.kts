@@ -11,8 +11,8 @@ android {
         applicationId = "com.pixelclassics.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 8
-        versionName = "4.0"
+        versionCode = 9
+        versionName = "4.1"
     }
 
     signingConfigs {

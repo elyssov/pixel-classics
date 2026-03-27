@@ -101,16 +101,23 @@ class MainActivity : AppCompatActivity() {
 
         dlog("Fullscreen OK")
 
-        // Start Score Service in background (don't let it block app start)
+        // Start Score Service in background — delay 5s, catch everything
         Handler(Looper.getMainLooper()).postDelayed({
-            dlog("Starting ScoreService")
+            dlog("Starting ScoreService (delayed)")
             try {
                 val intent = Intent(this, ScoreService::class.java)
-                startForegroundService(intent)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
+                dlog("ScoreService started OK")
             } catch (e: Exception) {
-                Log.e(TAG, "ScoreService start failed: ${e.message}")
+                dlog("ScoreService FAILED: ${e.message}")
+            } catch (e: Error) {
+                dlog("ScoreService ERROR: ${e.message}")
             }
-        }, 3000) // 3 second delay — let WebView load first
+        }, 5000)
 
         // WebView setup
         dlog("Creating WebView")
