@@ -560,29 +560,32 @@ const bootLines = [
 // ═══ BOOT ANIMATION ═══
 const bootEl = document.getElementById('boot-screen');
 let bootIndex = 0;
+let fotaPromise = null;
 
 // Start FOTA fetch immediately during DOS boot
-startFotaCheck();
-
-let fotaPromise = null; // the fetch promise
+try { startFotaCheck(); } catch(e) { console.error('FOTA init error:', e); }
 
 function typeBoot() {
   if (bootIndex >= bootLines.length) {
-    // Boot done — WAIT for FOTA check to complete, then decide
+    // Boot done — wait for FOTA check, then decide
     const proceed = () => {
-      if (fotaResult) {
-        showDosUpdateScreen(fotaResult).then(showNC);
-      } else {
+      try {
+        if (fotaResult) {
+          showDosUpdateScreen(fotaResult).then(showNC).catch(showNC);
+        } else {
+          showNC();
+        }
+      } catch(e) {
+        console.error('Boot proceed error:', e);
         showNC();
       }
     };
 
     if (fotaPromise) {
-      // Wait for fetch to finish (with 4s max timeout so we don't hang forever)
       const timeout = new Promise(r => setTimeout(r, 4000));
-      Promise.race([fotaPromise, timeout]).then(proceed);
+      Promise.race([fotaPromise, timeout]).then(proceed).catch(proceed);
     } else {
-      proceed();
+      setTimeout(proceed, 200);
     }
     return;
   }
@@ -954,5 +957,14 @@ function postBeep() {
 // ═══ START BOOT ═══
 // Small delay to feel like real boot — beep after memory test
 setTimeout(typeBoot, 300);
+
+// Emergency fallback: if nothing is visible after 12 seconds, force NC
+setTimeout(() => {
+  const nc = document.getElementById('nc-screen');
+  if (nc && nc.style.display !== 'flex') {
+    console.error('Emergency: forcing NC after 12s timeout');
+    showNC();
+  }
+}, 12000);
 </script>
 </body></html>
