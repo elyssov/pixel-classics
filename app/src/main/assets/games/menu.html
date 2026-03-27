@@ -564,16 +564,26 @@ let bootIndex = 0;
 // Start FOTA fetch immediately during DOS boot
 startFotaCheck();
 
+let fotaPromise = null; // the fetch promise
+
 function typeBoot() {
   if (bootIndex >= bootLines.length) {
-    // Boot done — show update screen if available, else go to NC
-    setTimeout(() => {
+    // Boot done — WAIT for FOTA check to complete, then decide
+    const proceed = () => {
       if (fotaResult) {
         showDosUpdateScreen(fotaResult).then(showNC);
       } else {
         showNC();
       }
-    }, 200);
+    };
+
+    if (fotaPromise) {
+      // Wait for fetch to finish (with 4s max timeout so we don't hang forever)
+      const timeout = new Promise(r => setTimeout(r, 4000));
+      Promise.race([fotaPromise, timeout]).then(proceed);
+    } else {
+      proceed();
+    }
     return;
   }
 
@@ -802,8 +812,35 @@ function showDosUpdateScreen(update) {
 function startFotaCheck() {
   const p = checkForUpdate();
   if (p && p.then) {
-    p.then(result => { fotaResult = result; });
+    fotaPromise = p.then(result => {
+      fotaResult = result;
+      return result;
+    });
   }
+}
+
+// Fallback: show green banner inside NC if FOTA arrived late
+function showUpdateBannerInNC(update) {
+  let bar = document.getElementById('update-bar');
+  if (bar) bar.remove();
+  bar = document.createElement('div');
+  bar.id = 'update-bar';
+  bar.style.cssText = 'background:#000;color:#55FF55;padding:4px 8px;font-size:11px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;';
+  bar.innerHTML = '<span>\u2191 Update v' + update.version + ' (' + update.sizeMB + ' MB)</span>' +
+    '<span style="display:flex;gap:8px;">' +
+    '<span id="update-install" style="color:#FFFF55;cursor:pointer;">[Install]</span>' +
+    '<span id="update-dismiss" style="color:#AA0000;cursor:pointer;">[Later]</span></span>';
+  const nc = document.getElementById('nc-screen');
+  const fnbar = nc.querySelector('.nc-fnbar');
+  nc.insertBefore(bar, fnbar);
+  document.getElementById('update-install').addEventListener('click', e => {
+    e.stopPropagation(); window.open(update.url, '_blank');
+  });
+  document.getElementById('update-dismiss').addEventListener('click', e => {
+    e.stopPropagation();
+    localStorage.setItem('pc_update_dismissed', String(CURRENT_BUILD));
+    bar.remove();
+  });
 }
 
 // ═══ GAME LAUNCHER ═══
