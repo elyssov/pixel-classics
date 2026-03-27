@@ -600,9 +600,24 @@ function draw() {
   }
 }
 
-function loop() { update(); draw(); requestAnimationFrame(loop); }
+const TICK = 1000 / 60;
+let lastTimeMs = 0;
+let accumulator = 0;
+
+function loop(timestamp) {
+  if (!lastTimeMs) lastTimeMs = timestamp;
+  const dt = Math.min(timestamp - lastTimeMs, 200);
+  lastTimeMs = timestamp;
+  accumulator += dt;
+  while (accumulator >= TICK) {
+    update();
+    accumulator -= TICK;
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
 // Don't auto-init — wait for difficulty selection
 gameStarted = false;
-loop();
+requestAnimationFrame(loop);
 </script>
 </body></html>

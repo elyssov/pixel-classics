@@ -990,41 +990,54 @@ function findPath(sx, sy, tx, ty) {
   return [];
 }
 
-// ── Rendering ──────────────────────────────────────────────────────────────
+// ── Viewport rendering ────────────────────────────────────────────────────
 let cellW, cellH, offsetX, offsetY, fontSize;
+let viewCols = 22, viewRows = 13;
+let camX = 0, camY = 0; // top-left of viewport in map coords
 
 function calcGrid() {
   const w = canvas.width, h = canvas.height;
-  const statusH = 2; // lines for status
-  const totalH = MAP_H + MSG_LINES + statusH;
-  cellW = Math.floor(w / MAP_W);
-  cellH = Math.floor(h / totalH);
+  // Reserve space for 2 msg lines at top + 2 status lines at bottom
+  const extraRows = 4;
+  cellW = Math.floor(w / viewCols);
+  cellH = Math.floor(h / (viewRows + extraRows));
   const cell = Math.min(cellW, cellH);
   cellW = cell;
   cellH = cell;
-  fontSize = Math.floor(cell * 0.85);
-  offsetX = Math.floor((w - MAP_W * cellW) / 2);
-  offsetY = MSG_LINES * cellH;
+  fontSize = Math.floor(cell * 0.9);
+  // Center the viewport grid horizontally
+  offsetX = Math.floor((w - viewCols * cellW) / 2);
+  offsetY = 2 * cellH; // 2 rows for messages at top
+}
+
+function updateCamera() {
+  // Center camera on player, clamped to map bounds
+  camX = player.x - Math.floor(viewCols / 2);
+  camY = player.y - Math.floor(viewRows / 2);
+  camX = Math.max(0, Math.min(camX, MAP_W - viewCols));
+  camY = Math.max(0, Math.min(camY, MAP_H - viewRows));
 }
 
 function draw() {
   calcGrid();
+  updateCamera();
   const w = canvas.width, h = canvas.height;
   ctx.fillStyle = C.black;
   ctx.fillRect(0, 0, w, h);
 
-  ctx.font = fontSize + 'px Consolas, "Courier New", monospace';
+  ctx.font = 'bold ' + fontSize + 'px Consolas, "Courier New", monospace';
   ctx.textBaseline = 'top';
   ctx.textAlign = 'center';
 
-  // Draw messages (top)
-  const recent = messages.slice(-MSG_LINES);
-  ctx.font = Math.floor(fontSize * 0.8) + 'px Consolas, "Courier New", monospace';
+  // Draw messages (top 2 rows)
+  const recent = messages.slice(-2);
+  const msgFs = Math.floor(fontSize * 0.7);
+  ctx.font = msgFs + 'px Consolas, "Courier New", monospace';
   for (let i = 0; i < recent.length; i++) {
     ctx.fillStyle = i === recent.length - 1 ? C.white : C.gray;
     ctx.fillText(recent[i], w / 2, i * cellH + 2, w - 10);
   }
-  ctx.font = fontSize + 'px Consolas, "Courier New", monospace';
+  ctx.font = 'bold ' + fontSize + 'px Consolas, "Courier New", monospace';
 
   if (gameState === 'dead' || gameState === 'win') {
     drawMap();
@@ -1052,10 +1065,15 @@ function drawMap() {
   const lvl = dungeon[curDepth];
   if (!lvl) return;
 
-  for (let y = 0; y < MAP_H; y++) {
-    for (let x = 0; x < MAP_W; x++) {
-      const sx = offsetX + x * cellW + cellW / 2;
-      const sy = offsetY + y * cellH;
+  // Only render the viewport window around the player
+  for (let vy = 0; vy < viewRows; vy++) {
+    for (let vx = 0; vx < viewCols; vx++) {
+      const x = camX + vx;
+      const y = camY + vy;
+      if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) continue;
+
+      const sx = offsetX + vx * cellW + cellW / 2;
+      const sy = offsetY + vy * cellH;
 
       if (visible[y] && visible[y][x]) {
         // Check for monster
@@ -1119,8 +1137,9 @@ function drawTile(tile, sx, sy) {
 }
 
 function drawStatusBar() {
-  const y = offsetY + MAP_H * cellH + 4;
-  const fs = Math.floor(fontSize * 0.75);
+  // Status goes below the viewport
+  const y = offsetY + viewRows * cellH + 4;
+  const fs = Math.floor(fontSize * 0.65);
   ctx.font = fs + 'px Consolas, "Courier New", monospace';
   ctx.textAlign = 'left';
 
@@ -1129,10 +1148,9 @@ function drawStatusBar() {
   const confStr = player.confused > 0 ? ' Conf' : '';
   const hasteStr = player.haste > 0 ? ' Haste' : '';
 
-  const line1 = 'Level:' + curDepth + '  HP:' + player.hp + '/' + player.maxHp +
-    '  STR:' + player.str + '  AC:' + player.ac + '  Gold:' + player.gold;
-  const line2 = 'Lv:' + player.level + '  XP:' + player.xp +
-    (player.weapon ? '  Wpn:' + itemName(player.weapon) : '') +
+  const line1 = 'Lv:' + curDepth + ' HP:' + player.hp + '/' + player.maxHp +
+    ' STR:' + player.str + ' AC:' + player.ac + ' Au:' + player.gold;
+  const line2 = 'XLv:' + player.level + ' XP:' + player.xp +
     hungerStr + blindStr + confStr + hasteStr;
 
   ctx.fillStyle = C.white;
@@ -1140,7 +1158,7 @@ function drawStatusBar() {
   ctx.fillStyle = C.gray;
   ctx.fillText(line2, 6, y + fs + 2);
   ctx.textAlign = 'center';
-  ctx.font = fontSize + 'px Consolas, "Courier New", monospace';
+  ctx.font = 'bold ' + fontSize + 'px Consolas, "Courier New", monospace';
 }
 
 function drawOverlay() {
@@ -1239,29 +1257,40 @@ const actionBtns = [];
 function drawDpad() {
   dpadBtns.length = 0;
   const w = canvas.width, h = canvas.height;
-  const sz = Math.min(42, Math.floor(w * 0.065));
-  const gap = 2;
-  const bx = sz + 10;
-  const by = h - sz * 3 - 20;
+  const sz = Math.max(44, Math.floor(Math.min(w, h) * 0.12));
+  const gap = 3;
+  const bx = sz + 14;
+  const by = h - sz * 3 - gap * 2 - 10;
 
-  ctx.globalAlpha = 0.25;
+  ctx.globalAlpha = 0.35;
   const dirs = [
-    { dx:0,  dy:-1, x:bx,        y:by },         // up
-    { dx:-1, dy:0,  x:bx-sz-gap,  y:by+sz+gap },  // left
-    { dx:1,  dy:0,  x:bx+sz+gap,  y:by+sz+gap },  // right
-    { dx:0,  dy:1,  x:bx,        y:by+2*(sz+gap) }, // down
+    { dx:0,  dy:-1, x:bx,            y:by,               label:'\u25B2' }, // up
+    { dx:-1, dy:0,  x:bx-sz-gap,     y:by+sz+gap,        label:'\u25C4' }, // left
+    { dx:1,  dy:0,  x:bx+sz+gap,     y:by+sz+gap,        label:'\u25BA' }, // right
+    { dx:0,  dy:1,  x:bx,            y:by+2*(sz+gap),     label:'\u25BC' }, // down
   ];
   for (const d of dirs) {
-    ctx.fillStyle = C.dkgray;
-    ctx.fillRect(d.x, d.y, sz, sz);
+    // Rounded rect background
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    const r = 6;
+    ctx.moveTo(d.x + r, d.y);
+    ctx.arcTo(d.x + sz, d.y, d.x + sz, d.y + sz, r);
+    ctx.arcTo(d.x + sz, d.y + sz, d.x, d.y + sz, r);
+    ctx.arcTo(d.x, d.y + sz, d.x, d.y, r);
+    ctx.arcTo(d.x, d.y, d.x + sz, d.y, r);
+    ctx.fill();
+    // Border
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.stroke();
     dpadBtns.push({ x:d.x, y:d.y, w:sz, h:sz, dx:d.dx, dy:d.dy });
     // Arrow symbol
-    ctx.fillStyle = C.gray;
-    ctx.font = Math.floor(sz*0.5) + 'px Consolas, monospace';
+    ctx.fillStyle = '#ddd';
+    ctx.font = 'bold ' + Math.floor(sz*0.45) + 'px Consolas, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const arrows = {'-1,0':'\u25C4','1,0':'\u25BA','0,-1':'\u25B2','0,1':'\u25BC'};
-    ctx.fillText(arrows[d.dx+','+d.dy], d.x+sz/2, d.y+sz/2);
+    ctx.fillText(d.label, d.x+sz/2, d.y+sz/2);
   }
   ctx.globalAlpha = 1;
   ctx.textBaseline = 'top';
@@ -1270,30 +1299,47 @@ function drawDpad() {
 function drawButtons() {
   actionBtns.length = 0;
   const w = canvas.width, h = canvas.height;
-  const bw = Math.min(36, Math.floor(w * 0.055));
+  const bw = Math.max(44, Math.floor(Math.min(w, h) * 0.11));
   const bh = bw;
-  const gap = 4;
-  const startX = w - bw - 8;
-  const startY = h - (bh + gap) * 5 - 8;
+  const gap = 5;
 
   const btns = [
-    { label:'i', action:'inv' },
-    { label:'>', action:'down' },
-    { label:'<', action:'up' },
-    { label:'q', action:'quaff' },
-    { label:'r', action:'read' },
-    { label:'e', action:'eat' },
-    { label:'?', action:'help' },
+    { label:'i',  action:'inv' },
+    { label:'>',  action:'down' },
+    { label:'<',  action:'up' },
+    { label:'q',  action:'quaff' },
+    { label:'e',  action:'eat' },
+    { label:'?',  action:'help' },
   ];
 
-  ctx.globalAlpha = 0.3;
+  // Layout: 2 columns x 3 rows on right side
+  const cols = 2, rows = 3;
+  const blockW = cols * bw + (cols - 1) * gap;
+  const blockH = rows * bh + (rows - 1) * gap;
+  const startX = w - blockW - 10;
+  const startY = h - blockH - 10;
+
+  ctx.globalAlpha = 0.4;
   for (let i = 0; i < btns.length; i++) {
-    const x = startX;
-    const y = startY + i * (bh + gap);
-    ctx.fillStyle = C.dkgray;
-    ctx.fillRect(x, y, bw, bh);
-    ctx.fillStyle = C.white;
-    ctx.font = Math.floor(bw * 0.5) + 'px Consolas, monospace';
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = startX + col * (bw + gap);
+    const y = startY + row * (bh + gap);
+    // Rounded rect
+    const r = 6;
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + bw, y, x + bw, y + bh, r);
+    ctx.arcTo(x + bw, y + bh, x, y + bh, r);
+    ctx.arcTo(x, y + bh, x, y, r);
+    ctx.arcTo(x, y, x + bw, y, r);
+    ctx.fill();
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#ddd';
+    ctx.font = 'bold ' + Math.floor(bw * 0.4) + 'px Consolas, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(btns[i].label, x + bw/2, y + bh/2);
@@ -1481,11 +1527,13 @@ canvas.addEventListener('touchend', (e) => {
     return;
   }
 
-  // Tap on map -> pathfind
+  // Tap on map -> pathfind (convert screen coords to map coords via viewport)
   if (dist < 15) {
-    const mapX = Math.floor((tx - offsetX) / cellW);
-    const mapY = Math.floor((ty - offsetY) / cellH);
-    if (mapX >= 0 && mapX < MAP_W && mapY >= 0 && mapY < MAP_H) {
+    const vx = Math.floor((tx - offsetX) / cellW);
+    const vy = Math.floor((ty - offsetY) / cellH);
+    const mapX = camX + vx;
+    const mapY = camY + vy;
+    if (vx >= 0 && vx < viewCols && vy >= 0 && vy < viewRows && mapX >= 0 && mapX < MAP_W && mapY >= 0 && mapY < MAP_H) {
       if (mapX === player.x && mapY === player.y) {
         // Tap self = wait
         endTurn();
@@ -1553,11 +1601,13 @@ canvas.addEventListener('mouseup', (e) => {
     }
   }
 
-  // Click on map
+  // Click on map (convert screen coords to map coords via viewport)
   if (dist < 10) {
-    const mapX = Math.floor((tx - offsetX) / cellW);
-    const mapY = Math.floor((ty - offsetY) / cellH);
-    if (mapX >= 0 && mapX < MAP_W && mapY >= 0 && mapY < MAP_H) {
+    const vx = Math.floor((tx - offsetX) / cellW);
+    const vy = Math.floor((ty - offsetY) / cellH);
+    const mapX = camX + vx;
+    const mapY = camY + vy;
+    if (vx >= 0 && vx < viewCols && vy >= 0 && vy < viewRows && mapX >= 0 && mapX < MAP_W && mapY >= 0 && mapY < MAP_H) {
       if (mapX === player.x && mapY === player.y) { endTurn(); return; }
       const path = findPath(player.x, player.y, mapX, mapY);
       if (path.length > 0) {

@@ -1152,8 +1152,19 @@ function drawGameOverScreen() {
   }
 }
 
-function gameLoop() {
-  update();
+const TICK = 1000 / 60;
+let lastTimeMs = 0;
+let loopAccum = 0;
+
+function gameLoop(timestamp) {
+  if (!lastTimeMs) lastTimeMs = timestamp;
+  const dt = Math.min(timestamp - lastTimeMs, 200);
+  lastTimeMs = timestamp;
+  loopAccum += dt;
+  while (loopAccum >= TICK) {
+    update();
+    loopAccum -= TICK;
+  }
   draw();
   requestAnimationFrame(gameLoop);
 }
@@ -1162,7 +1173,7 @@ function gameLoop() {
 function boot() {
   resize();
   init();
-  gameLoop();
+  requestAnimationFrame(gameLoop);
 }
 
 window.addEventListener('resize', () => {

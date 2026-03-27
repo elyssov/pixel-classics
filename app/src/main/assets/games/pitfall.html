@@ -8,9 +8,34 @@
   html, body { height: 100%; background: #000; overflow: hidden; touch-action: none; }
   body { display: flex; align-items: center; justify-content: center; }
   canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+  #touch-controls {
+    display: none; position: fixed; bottom: 0; left: 0; right: 0;
+    height: 80px; z-index: 10; pointer-events: none;
+    padding: 0 10px 10px 10px; box-sizing: border-box;
+  }
+  #touch-controls.visible { display: flex; justify-content: space-between; align-items: flex-end; }
+  .tc-btn {
+    pointer-events: auto; border: none; outline: none;
+    background: rgba(255,255,255,0.3); color: rgba(255,255,255,0.8);
+    font: bold 22px monospace; border-radius: 8px; min-height: 60px;
+    user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  }
+  .tc-btn:active { background: rgba(255,255,255,0.5); }
+  .tc-left-group { display: flex; gap: 6px; align-items: flex-end; }
+  .tc-btn-arrow { width: 64px; min-height: 60px; }
+  .tc-btn-down { width: 52px; min-height: 48px; font-size: 18px; }
+  .tc-btn-jump { width: 100px; min-height: 70px; font-size: 20px; }
 </style>
 </head><body>
 <canvas id="c"></canvas>
+<div id="touch-controls">
+  <div class="tc-left-group">
+    <button class="tc-btn tc-btn-arrow" id="btn-left">&larr;</button>
+    <button class="tc-btn tc-btn-down" id="btn-down">&darr;</button>
+    <button class="tc-btn tc-btn-arrow" id="btn-right">&rarr;</button>
+  </div>
+  <button class="tc-btn tc-btn-jump" id="btn-jump">JUMP</button>
+</div>
 <script src="sound.js"></script>
 <script src="loader.js"></script>
 <script>
@@ -263,7 +288,7 @@ function createCamera() {
 
 // --- Input ---
 const keys = {};
-let touchLeft = false, touchRight = false, touchJump = false;
+let touchLeft = false, touchRight = false, touchJump = false, touchDown = false;
 let touchStartX = 0, touchStartY = 0;
 let swipeUp = false, swipeDown = false;
 
@@ -278,40 +303,21 @@ document.addEventListener('keyup', e => {
 
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
-  for (const t of e.changedTouches) {
-    const rect = canvas.getBoundingClientRect();
-    const tx = (t.clientX - rect.left) / rect.width;
-    const ty = (t.clientY - rect.top) / rect.height;
-    touchStartX = tx; touchStartY = ty;
-    if (gameState === 'title' || gameState === 'gameover') {
-      if (gameState === 'title') startGame();
-      else { gameState = 'title'; }
-      return;
-    }
-    if (tx < 0.35) touchLeft = true;
-    else if (tx > 0.65) touchRight = true;
-    if (ty < 0.45) touchJump = true;
-  }
+  if (gameState === 'title') { startGame(); return; }
+  if (gameState === 'gameover') { gameState = 'title'; return; }
 }, { passive: false });
 
-canvas.addEventListener('touchmove', e => {
-  e.preventDefault();
-  for (const t of e.changedTouches) {
-    const rect = canvas.getBoundingClientRect();
-    const tx = (t.clientX - rect.left) / rect.width;
-    const ty = (t.clientY - rect.top) / rect.height;
-    // Detect swipes
-    const dy = ty - touchStartY;
-    const dx = tx - touchStartX;
-    if (dy < -0.08 && Math.abs(dx) < 0.1) swipeUp = true;
-    if (dy > 0.08 && Math.abs(dx) < 0.1) swipeDown = true;
-  }
-}, { passive: false });
-
-canvas.addEventListener('touchend', e => {
-  e.preventDefault();
-  touchLeft = false; touchRight = false; touchJump = false;
-});
+// HTML overlay button touch controls
+function setupTouchBtn(id, onDown, onUp) {
+  const el = document.getElementById(id);
+  el.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); onDown(); }, { passive: false });
+  el.addEventListener('touchend', e => { e.preventDefault(); e.stopPropagation(); onUp(); }, { passive: false });
+  el.addEventListener('touchcancel', e => { e.preventDefault(); onUp(); }, { passive: false });
+}
+setupTouchBtn('btn-left',  () => { touchLeft = true; },  () => { touchLeft = false; });
+setupTouchBtn('btn-right', () => { touchRight = true; }, () => { touchRight = false; });
+setupTouchBtn('btn-jump',  () => { touchJump = true; },  () => { touchJump = false; });
+setupTouchBtn('btn-down',  () => { touchDown = true; swipeDown = true; }, () => { touchDown = false; });
 
 canvas.addEventListener('mousedown', e => {
   if (gameState === 'title') { startGame(); return; }
@@ -984,32 +990,7 @@ function drawHUD() {
   }
 }
 
-// --- Touch Controls Overlay ---
-function drawTouchControls() {
-  ctx.globalAlpha = 0.15;
-
-  // Left zone
-  ctx.fillStyle = PAL.white;
-  ctx.fillRect(0, H * 0.5, W * 0.33, H * 0.5);
-  ctx.fillStyle = PAL.black;
-  ctx.font = 'bold 20px monospace';
-  ctx.fillText('<', W * 0.15, H * 0.78);
-
-  // Right zone
-  ctx.fillStyle = PAL.white;
-  ctx.fillRect(W * 0.67, H * 0.5, W * 0.33, H * 0.5);
-  ctx.fillStyle = PAL.black;
-  ctx.fillText('>', W * 0.82, H * 0.78);
-
-  // Jump zone indicator
-  ctx.fillStyle = PAL.skyBlue;
-  ctx.fillRect(W * 0.33, 22, W * 0.34, H * 0.28);
-  ctx.fillStyle = PAL.black;
-  ctx.font = '12px monospace';
-  ctx.fillText('JUMP', W * 0.45, H * 0.22);
-
-  ctx.globalAlpha = 1.0;
-}
+// Touch controls are now HTML overlay buttons (see #touch-controls div)
 
 // --- Particles ---
 function spawnParticles(x, y, color, count) {
@@ -1250,7 +1231,7 @@ function updateHarry() {
   }
 
   // Go underground via ladder
-  if (scr.hasLadder && !harry.isUnderground && harry.onGround && (swipeDown || keys['ArrowDown'] || keys['KeyS'])) {
+  if (scr.hasLadder && !harry.isUnderground && harry.onGround && (swipeDown || touchDown || keys['ArrowDown'] || keys['KeyS'])) {
     if (Math.abs(harryScreenX - scr.ladderX) < 20) {
       harry.isUnderground = true;
       harry.y = H * 0.85 - harry.h;
@@ -1597,14 +1578,24 @@ function drawGameFrame() {
   // HUD (not affected by camera shake)
   drawHUD();
 
-  // Touch controls (very subtle)
-  if ('ontouchstart' in window) {
-    drawTouchControls();
-  }
+  // Touch controls are HTML overlay (not canvas-drawn)
 }
 
-function gameLoop() {
-  update();
+// Delta-time frame accumulator: target 60fps regardless of display refresh rate
+const FRAME_TIME = 1000 / 60; // 16.667ms per logic frame
+let lastFrameTimestamp = 0;
+let accumulator = 0;
+
+function gameLoop(timestamp) {
+  if (!lastFrameTimestamp) lastFrameTimestamp = timestamp;
+  const dt = timestamp - lastFrameTimestamp;
+  lastFrameTimestamp = timestamp;
+  // Clamp dt to avoid spiral of death after tab switch or pause
+  accumulator += Math.min(dt, 200);
+  while (accumulator >= FRAME_TIME) {
+    update();
+    accumulator -= FRAME_TIME;
+  }
   draw();
   requestAnimationFrame(gameLoop);
 }
@@ -1622,14 +1613,19 @@ function init() {
   resize();
   window.addEventListener('resize', resize);
 
+  // Show touch controls on touch devices
+  if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+    document.getElementById('touch-controls').classList.add('visible');
+  }
+
   // Wait for loader
   if (window._gameReady) {
-    gameLoop();
+    requestAnimationFrame(gameLoop);
   } else {
-    window.addEventListener('gameready', () => gameLoop());
+    window.addEventListener('gameready', () => requestAnimationFrame(gameLoop));
     // Fallback in case loader doesn't fire
     setTimeout(() => {
-      if (gameState !== 'playing') gameLoop();
+      if (gameState !== 'playing') requestAnimationFrame(gameLoop);
     }, 3000);
   }
 }

@@ -7,9 +7,37 @@
   * { margin: 0; padding: 0; }
   body { background: #000; overflow: hidden; touch-action: none; }
   canvas { display: block; }
+  #touch-controls {
+    display: none; position: fixed; bottom: 0; left: 0; right: 0;
+    height: 90px; z-index: 10; pointer-events: none;
+    padding: 0 12px 12px 12px; box-sizing: border-box;
+  }
+  #touch-controls.visible { display: flex; justify-content: space-between; align-items: flex-end; }
+  .tc-btn {
+    pointer-events: auto; border: none; outline: none;
+    background: rgba(255,255,255,0.25); color: rgba(255,255,255,0.85);
+    font: bold 22px monospace; border-radius: 8px;
+    user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  }
+  .tc-btn:active { background: rgba(255,255,255,0.45); }
+  .tc-left-group { display: flex; gap: 8px; align-items: flex-end; }
+  .tc-btn-arrow { width: 64px; min-height: 60px; border: 2px solid rgba(68,68,204,0.6); }
+  .tc-btn-fire {
+    width: 110px; min-height: 70px; font-size: 20px; font-weight: bold;
+    background: rgba(204,34,34,0.4); border: 2px solid rgba(204,34,34,0.7);
+    color: rgba(255,200,200,0.9);
+  }
+  .tc-btn-fire:active { background: rgba(204,34,34,0.65); }
 </style>
 </head><body>
 <canvas id="c"></canvas>
+<div id="touch-controls">
+  <div class="tc-left-group">
+    <button class="tc-btn tc-btn-arrow" id="btn-left">&larr;</button>
+    <button class="tc-btn tc-btn-arrow" id="btn-right">&rarr;</button>
+  </div>
+  <button class="tc-btn tc-btn-fire" id="btn-fire">FIRE</button>
+</div>
 <script src="sound.js"></script>
 <script src="loader.js"></script>
 <script>
@@ -294,47 +322,28 @@ function addExplosion(x, y, size) {
   });
 }
 
-// Controls
-let touches = {};
-
+// Controls — HTML overlay buttons for touch, canvas fallback for tap-to-start/restart
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
   if (gameOver) { init(); return; }
   if (!gameStarted) { gameStarted = true; return; }
-  for (const t of e.changedTouches) {
-    touches[t.identifier] = { x: t.clientX, y: t.clientY };
-    if (t.clientX < W() / 3) touchLeft = true;
-    else if (t.clientX > W() * 2 / 3) touchRight = true;
-    else firing = true;
-  }
 }, { passive: false });
 
-canvas.addEventListener('touchmove', (e) => {
-  e.preventDefault();
-  touchLeft = false;
-  touchRight = false;
-  for (const t of e.changedTouches) {
-    touches[t.identifier] = { x: t.clientX, y: t.clientY };
-  }
-  for (const id in touches) {
-    if (touches[id].x < W() / 3) touchLeft = true;
-    else if (touches[id].x > W() * 2 / 3) touchRight = true;
-  }
-}, { passive: false });
+// HTML overlay button touch controls
+function setupTouchBtn(id, onDown, onUp) {
+  const el = document.getElementById(id);
+  el.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); onDown(); }, { passive: false });
+  el.addEventListener('touchend', e => { e.preventDefault(); e.stopPropagation(); onUp(); }, { passive: false });
+  el.addEventListener('touchcancel', e => { e.preventDefault(); onUp(); }, { passive: false });
+}
+setupTouchBtn('btn-left',  () => { touchLeft = true; },  () => { touchLeft = false; });
+setupTouchBtn('btn-right', () => { touchRight = true; }, () => { touchRight = false; });
+setupTouchBtn('btn-fire',  () => { firing = true; },     () => { firing = false; });
 
-canvas.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  for (const t of e.changedTouches) {
-    delete touches[t.identifier];
-  }
-  touchLeft = false;
-  touchRight = false;
-  firing = false;
-  for (const id in touches) {
-    if (touches[id].x < W() / 3) touchLeft = true;
-    else if (touches[id].x > W() * 2 / 3) touchRight = true;
-  }
-}, { passive: false });
+// Show touch controls on touch devices
+if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+  document.getElementById('touch-controls').classList.add('visible');
+}
 
 // Keyboard
 const keys = {};
@@ -854,9 +863,9 @@ function draw() {
 
     const instrScale = PX;
     const lines = [
-      'LEFT SIDE - MOVE LEFT',
-      'RIGHT SIDE - MOVE RIGHT',
-      'CENTER - FIRE',
+      'ARROWS - MOVE LEFT RIGHT',
+      'FIRE BUTTON - SHOOT',
+      'HOLD FIRE FOR AUTO FIRE',
       '',
       'DESTROY BRIDGES TO PASS',
       'FLY OVER FUEL DEPOTS',
@@ -893,11 +902,18 @@ function draw() {
   }
 }
 
+let dtAccum = 0;
+const TICK = 1 / 60; // cap logic at 60fps to prevent too-fast gameplay on 120Hz+
+
 function gameLoop(now) {
-  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  const rawDt = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
 
-  update(dt);
+  dtAccum += rawDt;
+  while (dtAccum >= TICK) {
+    update(TICK);
+    dtAccum -= TICK;
+  }
   draw();
 
   requestAnimationFrame(gameLoop);

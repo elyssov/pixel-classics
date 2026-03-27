@@ -174,13 +174,24 @@ function draw() {
   ctx.fillText('PONG', W / 2, H - 10);
 }
 
-function loop() {
-  update();
+const TICK = 1000 / 60;
+let lastTime = 0;
+let accumulator = 0;
+
+function loop(timestamp) {
+  if (!lastTime) lastTime = timestamp;
+  const dt = Math.min(timestamp - lastTime, 200);
+  lastTime = timestamp;
+  accumulator += dt;
+  while (accumulator >= TICK) {
+    update();
+    accumulator -= TICK;
+  }
   draw();
   requestAnimationFrame(loop);
 }
 
 init();
-loop();
+requestAnimationFrame(loop);
 </script>
 </body></html>

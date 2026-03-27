@@ -8,14 +8,112 @@
   body { background: #000; overflow: hidden; touch-action: none; display: flex; align-items: center; justify-content: center; height: 100%; }
   html { height: 100%; }
   canvas { display: block; image-rendering: pixelated; }
+
+  /* D-pad */
+  #dpad { position: fixed; bottom: 18px; left: 10px; z-index: 10; display: grid;
+    grid-template-columns: 54px 54px 54px; grid-template-rows: 54px 54px 54px;
+    gap: 4px; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+  #dpad button { background: rgba(68,170,68,0.35); border: 2px solid #44AA44; color: #44AA44;
+    font-size: 22px; font-weight: bold; border-radius: 8px; touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent; outline: none; padding: 0;
+    display: flex; align-items: center; justify-content: center; }
+  #dpad button:active { background: rgba(68,170,68,0.7); }
+  #dpad .blank { visibility: hidden; }
+  #dpad .up    { grid-column: 2; grid-row: 1; }
+  #dpad .left  { grid-column: 1; grid-row: 2; }
+  #dpad .right { grid-column: 3; grid-row: 2; }
+  #dpad .down  { grid-column: 2; grid-row: 3; }
+
+  /* Speed menu overlay */
+  #menu-screen { position: fixed; inset: 0; z-index: 20; background: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-family: monospace; color: #44AA44; }
+  #menu-screen.hidden { display: none; }
+  #menu-screen h1 { font-size: 42px; letter-spacing: 8px; margin-bottom: 28px; text-shadow: 0 0 12px #44AA44; }
+  #menu-screen .subtitle { font-size: 14px; color: #66cc66; margin-bottom: 18px; }
+  #speed-row { display: flex; gap: 6px; margin-bottom: 24px; flex-wrap: wrap; justify-content: center; }
+  #speed-row button { width: 42px; height: 42px; background: #111; border: 2px solid #44AA44;
+    color: #44AA44; font-family: monospace; font-size: 18px; font-weight: bold;
+    border-radius: 6px; cursor: pointer; touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent; }
+  #speed-row button.sel { background: #44AA44; color: #000; }
+  #start-btn { padding: 14px 48px; font-size: 22px; font-family: monospace; font-weight: bold;
+    background: #44AA44; color: #000; border: none; border-radius: 8px; cursor: pointer;
+    touch-action: manipulation; letter-spacing: 3px; margin-top: 8px; }
+  #start-btn:active { background: #66dd66; }
 </style>
 </head><body>
 <canvas id="c"></canvas>
+
+<div id="dpad">
+  <button class="up" ontouchstart="dpadTap(0,-1);event.preventDefault()">&#9650;</button>
+  <button class="left" ontouchstart="dpadTap(-1,0);event.preventDefault()">&#9664;</button>
+  <button class="right" ontouchstart="dpadTap(1,0);event.preventDefault()">&#9654;</button>
+  <button class="down" ontouchstart="dpadTap(0,1);event.preventDefault()">&#9660;</button>
+  <div class="blank"></div>
+</div>
+
+<div id="menu-screen">
+  <h1>FROGGER</h1>
+  <div class="subtitle">SELECT SPEED</div>
+  <div id="speed-row"></div>
+  <button id="start-btn" ontouchstart="startFromMenu();event.preventDefault()" onclick="startFromMenu()">START</button>
+</div>
+
 <script src="sound.js"></script>
 <script src="loader.js"></script>
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
+
+// Speed selection: 1-10, default 5
+let selectedSpeed = 5;
+let speedMultiplier = 1.0; // set from menu
+
+// Build speed buttons
+(function buildMenu() {
+  const row = document.getElementById('speed-row');
+  for (let i = 1; i <= 10; i++) {
+    const b = document.createElement('button');
+    b.textContent = i;
+    b.dataset.sp = i;
+    if (i === 5) b.classList.add('sel');
+    b.addEventListener('touchstart', function(e) { e.preventDefault(); pickSpeed(i); }, { passive: false });
+    b.addEventListener('click', function() { pickSpeed(i); });
+    row.appendChild(b);
+  }
+})();
+
+function pickSpeed(n) {
+  selectedSpeed = n;
+  document.querySelectorAll('#speed-row button').forEach(b => {
+    b.classList.toggle('sel', parseInt(b.dataset.sp) === n);
+  });
+}
+
+function speedForSelection(n) {
+  // 1=0.3x, 5=1.0x, 10=2.5x  (linear interpolation in two segments)
+  if (n <= 5) return 0.3 + (n - 1) * (0.7 / 4);   // 0.3 .. 1.0
+  return 1.0 + (n - 5) * (1.5 / 5);                 // 1.0 .. 2.5
+}
+
+function startFromMenu() {
+  speedMultiplier = speedForSelection(selectedSpeed);
+  document.getElementById('menu-screen').classList.add('hidden');
+  document.getElementById('dpad').style.display = 'grid';
+  initGame();
+}
+
+function dpadTap(dx, dy) {
+  if (gameState === 'gameover') { showMenu(); return; }
+  if (gameState === 'menu') return;
+  handleMove(dx, dy);
+}
+
+function showMenu() {
+  document.getElementById('menu-screen').classList.remove('hidden');
+  gameState = 'menu';
+}
 
 // Grid dimensions
 const COLS = 13;
@@ -81,6 +179,7 @@ function initGame() {
   level = 1;
   homeFilled = [false, false, false, false, false];
   gameState = 'play';
+  document.getElementById('dpad').style.display = 'grid';
   initLevel();
 }
 
@@ -118,7 +217,8 @@ function initHomes() {
 
 function initLanes() {
   lanes = [];
-  const sp = 0.4 + level * 0.08;
+  const levelBonus = 1 + (level - 1) * 0.1; // +10% per level completed
+  const sp = (0.4 + level * 0.08) * speedMultiplier * levelBonus;
 
   // Row 0: homes (handled separately)
   // Row 1: safe zone (grass/river bank)
@@ -232,8 +332,9 @@ let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
 const SWIPE_THRESH = 20;
 
 function handleMove(dx, dy) {
-  if (gameState === 'gameover' || gameState === 'title') {
-    initGame();
+  if (gameState === 'menu') return;
+  if (gameState === 'gameover') {
+    showMenu();
     return;
   }
   if (gameState !== 'play' || !frog.alive || hopAnim) return;
@@ -299,7 +400,8 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowLeft' || e.key === 'a') handleMove(-1, 0);
   else if (e.key === 'ArrowRight' || e.key === 'd') handleMove(1, 0);
   else if (e.key === ' ' || e.key === 'Enter') {
-    if (gameState === 'gameover' || gameState === 'title') initGame();
+    if (gameState === 'gameover') showMenu();
+    else if (gameState === 'menu') startFromMenu();
   }
 });
 
@@ -542,7 +644,7 @@ function draw() {
   ctx.fillStyle = C.bg;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  if (gameState === 'title') {
+  if (gameState === 'title' || gameState === 'menu') {
     drawTitle();
     return;
   }
@@ -663,7 +765,7 @@ function draw() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     drawText('GAME OVER', canvas.width / 2 - CELL * 2.5, canvas.height / 2 - CELL, CELL * 0.6, C.frogDead);
     drawText('SCORE ' + score, canvas.width / 2 - CELL * 2, canvas.height / 2 + CELL * 0.3, CELL * 0.4, C.text);
-    drawText('TAP TO RESTART', canvas.width / 2 - CELL * 2.5, canvas.height / 2 + CELL * 1.5, CELL * 0.35, C.car2);
+    drawText('TAP TO CONTINUE', canvas.width / 2 - CELL * 2.8, canvas.height / 2 + CELL * 1.5, CELL * 0.35, C.car2);
   }
 }
 
@@ -880,27 +982,40 @@ function drawTitle() {
 
 // Main loop
 hiScore = 0;
-gameState = 'title';
+gameState = 'menu';
+document.getElementById('dpad').style.display = 'none';
 
-function gameLoop(ts) {
-  let dt = Math.min((ts - lastTime) / 1000, 0.05);
-  lastTime = ts;
+const TICK_SEC = 1 / 60;
+const TICK_MS = 1000 / 60;
+let loopAccum = 0;
 
+function fixedUpdate() {
   if (gameState === 'dying') {
-    deathTimer -= dt;
+    deathTimer -= TICK_SEC;
     if (deathTimer <= 0) {
       afterDeath();
     }
   }
 
   if (gameState === 'win') {
-    winTimer -= dt;
+    winTimer -= TICK_SEC;
     if (winTimer <= 0) {
       afterWin();
     }
   }
 
-  update(dt);
+  update(TICK_SEC);
+}
+
+function gameLoop(ts) {
+  const rawDt = Math.min(ts - lastTime, 200);
+  lastTime = ts;
+
+  loopAccum += rawDt;
+  while (loopAccum >= TICK_MS) {
+    fixedUpdate();
+    loopAccum -= TICK_MS;
+  }
   draw();
   requestAnimationFrame(gameLoop);
 }

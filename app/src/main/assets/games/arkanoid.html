@@ -843,12 +843,19 @@ function draw() {
 }
 
 // ── Game loop ──────────────────────────────────────────────────
+const TICK = 1000 / 60;
+let loopAccum = 0;
+
 function loop(timestamp) {
   if (!lastTime) lastTime = timestamp;
-  const dt = Math.min(timestamp - lastTime, 32); // cap at ~30fps minimum
+  const dt = Math.min(timestamp - lastTime, 200);
   lastTime = timestamp;
 
-  update(dt);
+  loopAccum += dt;
+  while (loopAccum >= TICK) {
+    update(TICK);
+    loopAccum -= TICK;
+  }
   draw();
   requestAnimationFrame(loop);
 }
