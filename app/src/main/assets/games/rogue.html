@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Rogue</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; touch-action: none; }
+  canvas { display: block; }
+</style>
+</head><body>
+<canvas id="c"></canvas>
+<script src="sound.js"></script>
+<script src="loader.js"></script>
+<script>
+// ============================================================================
+//  ROGUE — The classic 1980 dungeon crawler
+//  Procedural dungeons, permadeath, ASCII graphics on canvas
+// ============================================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', () => { resize(); draw(); });
+
+// ── Constants ──────────────────────────────────────────────────────────────
+const MAX_DEPTH = 26;
+const MAP_W = 80;
+const MAP_H = 22;
+const MSG_LINES = 3;
+const INV_MAX = 20;
+
+const T_WALL  = '#';
+const T_FLOOR = '.';
+const T_CORR  = '~';  // internal corridor marker, renders as #
+const T_DOOR  = '+';
+const T_DNSTR = '>';
+const T_UPSTR = '<';
+const T_NONE  = ' ';
+
+// DOS color palette
+const C = {
+  black:   '#000000', dkgray:  '#555555', gray:    '#AAAAAA', white:   '#FFFFFF',
+  red:     '#FF5555', dkred:   '#AA0000', green:   '#55FF55', dkgreen: '#00AA00',
+  blue:    '#5555FF', dkblue:  '#0000AA', cyan:    '#55FFFF', dkcyan:  '#00AAAA',
+  magenta: '#FF55FF', dkmag:   '#AA00AA', yellow:  '#FFFF55', brown:   '#AA5500',
+  orange:  '#FF8800',
+};
+
+// ── RNG ────────────────────────────────────────────────────────────────────
+function rng(max) { return Math.floor(Math.random() * max); }
+function rngRange(lo, hi) { return lo + rng(hi - lo + 1); }
+function pick(arr) { return arr[rng(arr.length)]; }
+function shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = rng(i + 1); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; }
+
+// ── Monster definitions ────────────────────────────────────────────────────
+const MONSTER_DEFS = [
+  { ch:'B', name:'bat',         minLv:1,  hp:4,   dmg:[1,3],  ac:3,  xp:2,   col:C.red,     flags:['erratic'] },
+  { ch:'S', name:'snake',       minLv:1,  hp:5,   dmg:[1,4],  ac:5,  xp:3,   col:C.green,   flags:['poison'] },
+  { ch:'E', name:'emu',         minLv:1,  hp:6,   dmg:[1,3],  ac:7,  xp:2,   col:C.green,   flags:[] },
+  { ch:'K', name:'kobold',      minLv:2,  hp:5,   dmg:[1,5],  ac:7,  xp:3,   col:C.red,     flags:[] },
+  { ch:'H', name:'hobgoblin',   minLv:3,  hp:8,   dmg:[1,6],  ac:5,  xp:5,   col:C.red,     flags:[] },
+  { ch:'I', name:'ice monster', minLv:3,  hp:7,   dmg:[1,3],  ac:9,  xp:6,   col:C.cyan,    flags:['freeze'] },
+  { ch:'O', name:'orc',         minLv:4,  hp:12,  dmg:[1,8],  ac:6,  xp:8,   col:C.red,     flags:[] },
+  { ch:'R', name:'rattlesnake', minLv:5,  hp:10,  dmg:[1,7],  ac:3,  xp:10,  col:C.green,   flags:['poison'] },
+  { ch:'Z', name:'zombie',      minLv:5,  hp:14,  dmg:[1,8],  ac:8,  xp:10,  col:C.dkgreen, flags:[] },
+  { ch:'C', name:'centaur',     minLv:7,  hp:16,  dmg:[1,9],  ac:4,  xp:15,  col:C.magenta, flags:[] },
+  { ch:'Q', name:'quasit',      minLv:8,  hp:12,  dmg:[1,6],  ac:2,  xp:15,  col:C.magenta, flags:[] },
+  { ch:'A', name:'aquator',     minLv:9,  hp:18,  dmg:[1,5],  ac:2,  xp:18,  col:C.cyan,    flags:['rust'] },
+  { ch:'N', name:'nymph',       minLv:10, hp:14,  dmg:[0,0],  ac:2,  xp:20,  col:C.green,   flags:['steal'] },
+  { ch:'Y', name:'yeti',        minLv:11, hp:22,  dmg:[1,10], ac:6,  xp:25,  col:C.white,   flags:[] },
+  { ch:'T', name:'troll',       minLv:13, hp:30,  dmg:[2,8],  ac:4,  xp:40,  col:C.red,     flags:['regen'] },
+  { ch:'W', name:'wraith',      minLv:14, hp:25,  dmg:[1,8],  ac:4,  xp:45,  col:C.dkgray,  flags:['drain'] },
+  { ch:'F', name:'griffin',     minLv:16, hp:40,  dmg:[2,10], ac:2,  xp:60,  col:C.yellow,  flags:[] },
+  { ch:'U', name:'umber hulk',  minLv:18, hp:45,  dmg:[2,12], ac:2,  xp:80,  col:C.brown,   flags:[] },
+  { ch:'V', name:'vampire',     minLv:19, hp:40,  dmg:[1,12], ac:1,  xp:90,  col:C.dkred,   flags:['drain'] },
+  { ch:'X', name:'xorn',        minLv:20, hp:50,  dmg:[2,12], ac:0,  xp:100, col:C.brown,   flags:[] },
+  { ch:'M', name:'medusa',      minLv:22, hp:48,  dmg:[2,10], ac:2,  xp:110, col:C.magenta, flags:[] },
+  { ch:'D', name:'dragon',      minLv:24, hp:70,  dmg:[3,12], ac:0,  xp:150, col:C.red,     flags:['fire'] },
+];
+
+// ── Item definitions ───────────────────────────────────────────────────────
+const POTION_TYPES = [
+  'healing','extra healing','poison','strength','restore strength',
+  'blindness','confusion','see invisible','raise level','haste self'
+];
+const SCROLL_TYPES = [
+  'identify','enchant weapon','enchant armor','remove curse','teleportation',
+  'scare monster','sleep','create monster','aggravate monster','magic mapping'
+];
+const WEAPON_TYPES = [
+  { name:'mace',          dmg:[2,4], bonus:0 },
+  { name:'long sword',    dmg:[3,4], bonus:0 },
+  { name:'short bow',     dmg:[1,1], bonus:0 },
+  { name:'two-handed sword',dmg:[4,4], bonus:0 },
+  { name:'dagger',        dmg:[1,6], bonus:0 },
+  { name:'spear',         dmg:[2,3], bonus:0 },
+];
+const ARMOR_TYPES = [
+  { name:'leather armor',  ac:8 },
+  { name:'ring mail',      ac:7 },
+  { name:'scale mail',     ac:6 },
+  { name:'chain mail',     ac:5 },
+  { name:'banded mail',    ac:4 },
+  { name:'plate mail',     ac:3 },
+];
+const FOOD_NAMES = ['food ration','slime mold'];
+const POTION_COLORS = shuffle(['red','blue','green','yellow','purple','orange','cyan','pink','amber','silver']);
+const SCROLL_TITLES = shuffle(['XYZZY','PLUGH','YLLAM','FOOBAR','AXBEI','DRENZ','QWERT','UMBRA','ZELGO','THRAK']);
+
+// Track which item types are identified
+let identPotions = {};
+let identScrolls = {};
+
+// ── Player state ───────────────────────────────────────────────────────────
+let player, inventory, messages, gameState, dungeon, curDepth;
+let lastDir = { dx: 0, dy: 0 };
+let showInventory = false;
+let invAction = null; // null, 'quaff', 'read', 'eat', 'wield', 'wear', 'drop'
+let targetMode = false;
+let autoPath = [];
+let hasAmulet = false;
+let turnCount = 0;
+let seenTiles = {}; // per-depth visibility memory
+
+function initGame() {
+  player = {
+    x: 0, y: 0, hp: 12, maxHp: 12, str: 16, maxStr: 16,
+    ac: 10, level: 1, xp: 0, gold: 0, food: 900,
+    weapon: { type: 'weapon', subtype: WEAPON_TYPES[0], name: 'mace', bonus: 1, identified: true },
+    armor: { type: 'armor', subtype: ARMOR_TYPES[0], name: 'leather armor', bonus: 0, identified: true },
+    ring: null, blind: 0, confused: 0, haste: 0, seeInvis: 0,
+  };
+  player.ac = player.armor ? player.armor.subtype.ac - player.armor.bonus : 10;
+  inventory = [player.weapon, player.armor, makeFood()];
+  messages = [];
+  curDepth = 1;
+  dungeon = {};
+  seenTiles = {};
+  hasAmulet = false;
+  turnCount = 0;
+  showInventory = false;
+  invAction = null;
+  gameState = 'play'; // 'play', 'dead', 'win'
+  generateLevel(curDepth);
+  msg('Welcome to the Dungeons of Doom, adventurer!');
+  msg('Press ? or tap [?] for help.');
+  computeFOV();
+  draw();
+}
+
+// ── Messages ───────────────────────────────────────────────────────────────
+function msg(s) { messages.push(s); if (messages.length > 100) messages.shift(); }
+
+// ── Item creation ──────────────────────────────────────────────────────────
+function makePotion() {
+  const t = rng(POTION_TYPES.length);
+  return { type:'potion', subIdx:t, name:POTION_TYPES[t], ch:'!', col:C.cyan };
+}
+function makeScroll() {
+  const t = rng(SCROLL_TYPES.length);
+  return { type:'scroll', subIdx:t, name:SCROLL_TYPES[t], ch:'?', col:C.blue };
+}
+function makeWeapon() {
+  const w = pick(WEAPON_TYPES);
+  const bonus = rng(3);
+  return { type:'weapon', subtype:w, name:w.name, bonus, identified:false, ch:')', col:C.white };
+}
+function makeArmor() {
+  const a = pick(ARMOR_TYPES);
+  const bonus = rng(3);
+  return { type:'armor', subtype:a, name:a.name, bonus, identified:false, ch:']', col:C.white };
+}
+function makeRing() {
+  const effects = ['protection','add strength','sustain strength','searching','see invisible'];
+  const e = pick(effects);
+  return { type:'ring', name:'ring of '+e, effect:e, bonus:rngRange(1,2), ch:'=', col:C.yellow };
+}
+function makeGold(depth) {
+  return { type:'gold', amount: rngRange(5, 15) * depth, ch:'$', col:C.yellow };
+}
+function makeFood() {
+  return { type:'food', name:pick(FOOD_NAMES), ch:'*', col:C.brown };
+}
+function makeAmulet() {
+  return { type:'amulet', name:'The Amulet of Yendor', ch:',', col:C.magenta };
+}
+
+function itemName(it) {
+  if (!it) return 'nothing';
+  if (it.type === 'gold') return it.amount + ' gold pieces';
+  if (it.type === 'food') return it.name;
+  if (it.type === 'amulet') return it.name;
+  if (it.type === 'potion') {
+    if (identPotions[it.subIdx]) return 'potion of ' + it.name;
+    return POTION_COLORS[it.subIdx] + ' potion';
+  }
+  if (it.type === 'scroll') {
+    if (identScrolls[it.subIdx]) return 'scroll of ' + it.name;
+    return 'scroll titled "' + SCROLL_TITLES[it.subIdx] + '"';
+  }
+  if (it.type === 'weapon') {
+    if (it.identified) return '+' + it.bonus + ' ' + it.name;
+    return it.name;
+  }
+  if (it.type === 'armor') {
+    if (it.identified) return '+' + it.bonus + ' ' + it.name;
+    return it.name;
+  }
+  if (it.type === 'ring') return it.name;
+  return it.name || '???';
+}
+
+// ── Dungeon generation (BSP) ──────────────────────────────────────────────
+function generateLevel(depth) {
+  const lvl = {
+    map: [], monsters: [], items: [], rooms: [],
+    upStair: null, dnStair: null, depth,
+  };
+  // Init map
+  for (let y = 0; y < MAP_H; y++) {
+    lvl.map[y] = [];
+    for (let x = 0; x < MAP_W; x++) lvl.map[y][x] = T_NONE;
+  }
+  // BSP split
+  const leaves = [];
+  function splitBSP(x, y, w, h, iter) {
+    if (iter <= 0 || w < 10 || h < 7) { leaves.push({x,y,w,h}); return; }
+    if (w > h * 1.25 && w > 12) {
+      const sx = x + rngRange(4, w - 5);
+      splitBSP(x, y, sx - x, h, iter - 1);
+      splitBSP(sx, y, x + w - sx, h, iter - 1);
+    } else if (h > 7) {
+      const sy = y + rngRange(3, h - 4);
+      splitBSP(x, y, w, sy - y, iter - 1);
+      splitBSP(x, sy, w, y + h - sy, iter - 1);
+    } else {
+      leaves.push({x,y,w,h});
+    }
+  }
+  splitBSP(1, 1, MAP_W - 2, MAP_H - 2, 3);
+
+  // Create rooms from leaves
+  for (const leaf of leaves) {
+    const rw = rngRange(4, Math.min(12, leaf.w - 2));
+    const rh = rngRange(3, Math.min(7, leaf.h - 2));
+    const rx = leaf.x + rng(Math.max(1, leaf.w - rw - 1));
+    const ry = leaf.y + rng(Math.max(1, leaf.h - rh - 1));
+    const room = { x: rx, y: ry, w: rw, h: rh, cx: Math.floor(rx + rw / 2), cy: Math.floor(ry + rh / 2) };
+    lvl.rooms.push(room);
+    // Carve room
+    for (let dy = 0; dy < rh; dy++) {
+      for (let dx = 0; dx < rw; dx++) {
+        const mx = rx + dx, my = ry + dy;
+        if (mx >= MAP_W || my >= MAP_H) continue;
+        if (dy === 0 || dy === rh - 1 || dx === 0 || dx === rw - 1) {
+          lvl.map[my][mx] = T_WALL;
+        } else {
+          lvl.map[my][mx] = T_FLOOR;
+        }
+      }
+    }
+  }
+
+  // Connect rooms with corridors
+  for (let i = 0; i < lvl.rooms.length - 1; i++) {
+    const a = lvl.rooms[i], b = lvl.rooms[i + 1];
+    carveCorridor(lvl, a.cx, a.cy, b.cx, b.cy);
+  }
+  // Extra corridor for connectivity
+  if (lvl.rooms.length > 2) {
+    const a = lvl.rooms[0], b = lvl.rooms[lvl.rooms.length - 1];
+    carveCorridor(lvl, a.cx, a.cy, b.cx, b.cy);
+  }
+
+  // Place doors at room entrances
+  for (const room of lvl.rooms) {
+    for (let dy = 0; dy < room.h; dy++) {
+      for (let dx = 0; dx < room.w; dx++) {
+        const mx = room.x + dx, my = room.y + dy;
+        if (mx <= 0 || my <= 0 || mx >= MAP_W - 1 || my >= MAP_H - 1) continue;
+        if (lvl.map[my][mx] !== T_WALL) continue;
+        // Check if this wall touches a corridor
+        const adj = [[0,-1],[0,1],[-1,0],[1,0]];
+        let touchCorr = false, touchFloor = false;
+        for (const [ax,ay] of adj) {
+          const t = lvl.map[my+ay] && lvl.map[my+ay][mx+ax];
+          if (t === T_CORR) touchCorr = true;
+          if (t === T_FLOOR) touchFloor = true;
+        }
+        if (touchCorr && touchFloor) {
+          lvl.map[my][mx] = T_DOOR;
+        }
+      }
+    }
+  }
+
+  // Place stairs
+  const upRoom = lvl.rooms[0];
+  const dnRoom = lvl.rooms[lvl.rooms.length - 1];
+  const upPos = roomFloorTile(lvl, upRoom);
+  lvl.upStair = upPos;
+  lvl.map[upPos.y][upPos.x] = T_UPSTR;
+
+  if (depth < MAX_DEPTH) {
+    const dnPos = roomFloorTile(lvl, dnRoom);
+    lvl.dnStair = dnPos;
+    lvl.map[dnPos.y][dnPos.x] = T_DNSTR;
+  }
+
+  // Place player
+  if (!dungeon[depth]) {
+    player.x = upPos.x;
+    player.y = upPos.y;
+  }
+
+  // Place monsters
+  for (const room of lvl.rooms) {
+    const count = rngRange(0, Math.min(3, 1 + Math.floor(depth / 4)));
+    for (let i = 0; i < count; i++) {
+      const pos = roomFloorTile(lvl, room);
+      if (pos.x === player.x && pos.y === player.y) continue;
+      if (lvl.monsters.find(m => m.x === pos.x && m.y === pos.y)) continue;
+      const eligible = MONSTER_DEFS.filter(d => d.minLv <= depth + 3);
+      // Bias toward level-appropriate monsters
+      const weighted = eligible.filter(d => d.minLv <= depth);
+      const pool = weighted.length > 0 ? weighted : eligible;
+      const def = pick(pool);
+      const hpScale = 1 + depth * 0.08;
+      lvl.monsters.push({
+        x: pos.x, y: pos.y, ch: def.ch, name: def.name,
+        hp: Math.round(def.hp * hpScale), maxHp: Math.round(def.hp * hpScale),
+        dmg: [...def.dmg], ac: def.ac, xp: def.xp,
+        col: def.col, flags: [...def.flags], sleeping: rng(3) === 0,
+      });
+    }
+  }
+
+  // Place items
+  const itemCount = rngRange(2, 5);
+  for (let i = 0; i < itemCount; i++) {
+    const room = pick(lvl.rooms);
+    const pos = roomFloorTile(lvl, room);
+    const roll = rng(100);
+    let item;
+    if (roll < 25) item = makePotion();
+    else if (roll < 45) item = makeScroll();
+    else if (roll < 55) item = makeWeapon();
+    else if (roll < 65) item = makeArmor();
+    else if (roll < 70) item = makeRing();
+    else if (roll < 85) item = makeFood();
+    else item = makeGold(depth);
+    item.x = pos.x; item.y = pos.y;
+    lvl.items.push(item);
+  }
+
+  // Extra gold piles
+  for (const room of lvl.rooms) {
+    if (rng(3) === 0) {
+      const pos = roomFloorTile(lvl, room);
+      const g = makeGold(depth);
+      g.x = pos.x; g.y = pos.y;
+      lvl.items.push(g);
+    }
+  }
+
+  // Amulet of Yendor on level 26
+  if (depth === MAX_DEPTH) {
+    const aRoom = pick(lvl.rooms);
+    const aPos = roomFloorTile(lvl, aRoom);
+    const am = makeAmulet();
+    am.x = aPos.x; am.y = aPos.y;
+    lvl.items.push(am);
+  }
+
+  dungeon[depth] = lvl;
+  if (!seenTiles[depth]) {
+    seenTiles[depth] = [];
+    for (let y = 0; y < MAP_H; y++) {
+      seenTiles[depth][y] = [];
+      for (let x = 0; x < MAP_W; x++) seenTiles[depth][y][x] = false;
+    }
+  }
+}
+
+function carveCorridor(lvl, x1, y1, x2, y2) {
+  let x = x1, y = y1;
+  // Horizontal then vertical (or vice versa randomly)
+  const hFirst = rng(2) === 0;
+  if (hFirst) {
+    while (x !== x2) { carveCorridorTile(lvl, x, y); x += x < x2 ? 1 : -1; }
+    while (y !== y2) { carveCorridorTile(lvl, x, y); y += y < y2 ? 1 : -1; }
+  } else {
+    while (y !== y2) { carveCorridorTile(lvl, x, y); y += y < y2 ? 1 : -1; }
+    while (x !== x2) { carveCorridorTile(lvl, x, y); x += x < x2 ? 1 : -1; }
+  }
+  carveCorridorTile(lvl, x, y);
+}
+
+function carveCorridorTile(lvl, x, y) {
+  if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return;
+  const t = lvl.map[y][x];
+  if (t === T_FLOOR || t === T_DOOR || t === T_UPSTR || t === T_DNSTR) return;
+  lvl.map[y][x] = T_CORR;
+}
+
+function roomFloorTile(lvl, room) {
+  for (let tries = 0; tries < 50; tries++) {
+    const x = room.x + 1 + rng(Math.max(1, room.w - 2));
+    const y = room.y + 1 + rng(Math.max(1, room.h - 2));
+    if (y < MAP_H && x < MAP_W && (lvl.map[y][x] === T_FLOOR || lvl.map[y][x] === T_UPSTR || lvl.map[y][x] === T_DNSTR)) {
+      return { x, y };
+    }
+  }
+  return { x: room.x + 1, y: room.y + 1 };
+}
+
+// ── FOV / Visibility ───────────────────────────────────────────────────────
+let visible = [];
+function computeFOV() {
+  const lvl = dungeon[curDepth];
+  visible = [];
+  for (let y = 0; y < MAP_H; y++) { visible[y] = []; for (let x = 0; x < MAP_W; x++) visible[y][x] = false; }
+
+  if (player.blind > 0) {
+    visible[player.y][player.x] = true;
+    seenTiles[curDepth][player.y][player.x] = true;
+    return;
+  }
+
+  // If player is in a room, reveal entire room
+  const room = roomAt(lvl, player.x, player.y);
+  if (room) {
+    for (let dy = 0; dy < room.h; dy++) {
+      for (let dx = 0; dx < room.w; dx++) {
+        const mx = room.x + dx, my = room.y + dy;
+        if (mx < MAP_W && my < MAP_H) {
+          visible[my][mx] = true;
+          seenTiles[curDepth][my][mx] = true;
+        }
+      }
+    }
+    // Also reveal one tile outside doors
+    for (let dy = 0; dy < room.h; dy++) {
+      for (let dx = 0; dx < room.w; dx++) {
+        const mx = room.x + dx, my = room.y + dy;
+        if (lvl.map[my] && lvl.map[my][mx] === T_DOOR) {
+          for (const [ax,ay] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+            const nx = mx+ax, ny = my+ay;
+            if (ny >= 0 && ny < MAP_H && nx >= 0 && nx < MAP_W) {
+              visible[ny][nx] = true;
+              seenTiles[curDepth][ny][nx] = true;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Corridor: reveal adjacent tiles
+  const radius = 1;
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const nx = player.x + dx, ny = player.y + dy;
+      if (ny >= 0 && ny < MAP_H && nx >= 0 && nx < MAP_W) {
+        visible[ny][nx] = true;
+        seenTiles[curDepth][ny][nx] = true;
+      }
+    }
+  }
+}
+
+function roomAt(lvl, px, py) {
+  for (const r of lvl.rooms) {
+    if (px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h) return r;
+  }
+  return null;
+}
+
+// ── Player actions ─────────────────────────────────────────────────────────
+function tryMove(dx, dy) {
+  if (gameState !== 'play') return;
+  if (showInventory) return;
+
+  // Confusion: randomize direction
+  if (player.confused > 0) {
+    const dirs = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+    const d = pick(dirs);
+    dx = d[0]; dy = d[1];
+  }
+
+  const nx = player.x + dx, ny = player.y + dy;
+  if (nx < 0 || nx >= MAP_W || ny < 0 || ny >= MAP_H) return;
+
+  const lvl = dungeon[curDepth];
+  const tile = lvl.map[ny][nx];
+
+  // Can't walk through walls
+  if (tile === T_WALL || tile === T_NONE) {
+    return;
+  }
+
+  // Check for monster -> attack
+  const mon = lvl.monsters.find(m => m.x === nx && m.y === ny);
+  if (mon) {
+    attackMonster(mon);
+    lastDir = {dx, dy};
+    endTurn();
+    return;
+  }
+
+  // Move
+  player.x = nx;
+  player.y = ny;
+  lastDir = {dx, dy};
+
+  // Pick up items
+  const itemsHere = lvl.items.filter(it => it.x === nx && it.y === ny);
+  for (const it of itemsHere) {
+    if (it.type === 'gold') {
+      player.gold += it.amount;
+      msg('You found ' + it.amount + ' gold pieces.');
+      SFX.eat();
+    } else if (it.type === 'amulet') {
+      hasAmulet = true;
+      if (inventory.length < INV_MAX) inventory.push(it);
+      msg('You found The Amulet of Yendor! Now ascend to the surface!');
+      SFX.win();
+    } else {
+      if (inventory.length < INV_MAX) {
+        inventory.push(it);
+        msg('You picked up ' + itemName(it) + '.');
+        SFX.click();
+      } else {
+        msg('Your pack is full!');
+        continue; // don't remove from floor
+      }
+    }
+    lvl.items = lvl.items.filter(i => i !== it);
+  }
+
+  endTurn();
+}
+
+function attackMonster(mon) {
+  const lvl = dungeon[curDepth];
+  const wpn = player.weapon;
+  const baseDmg = wpn ? rollDice(wpn.subtype.dmg[0], wpn.subtype.dmg[1]) + wpn.bonus : rollDice(1, 4);
+  const strBonus = Math.floor((player.str - 10) / 2);
+  let dmg = Math.max(1, baseDmg + strBonus);
+
+  // Hit check
+  const hitRoll = rngRange(1, 20);
+  const needed = Math.max(2, mon.ac - player.level);
+  if (hitRoll < needed && hitRoll !== 20) {
+    msg('You miss the ' + mon.name + '.');
+    SFX.wallHit();
+    return;
+  }
+
+  mon.hp -= dmg;
+  mon.sleeping = false;
+  msg('You hit the ' + mon.name + ' for ' + dmg + ' damage.');
+  SFX.paddleHit();
+
+  if (mon.hp <= 0) {
+    msg('You defeated the ' + mon.name + '!');
+    player.xp += mon.xp;
+    SFX.brickBreak();
+    lvl.monsters = lvl.monsters.filter(m => m !== mon);
+    checkLevelUp();
+  }
+}
+
+function rollDice(n, sides) {
+  let total = 0;
+  for (let i = 0; i < n; i++) total += rngRange(1, sides);
+  return total;
+}
+
+function checkLevelUp() {
+  const thresholds = [0,10,30,70,150,300,600,1200,2400,4800,10000];
+  while (player.level < thresholds.length && player.xp >= thresholds[player.level]) {
+    player.level++;
+    const hpGain = rngRange(3, 8);
+    player.maxHp += hpGain;
+    player.hp = Math.min(player.hp + hpGain, player.maxHp);
+    msg('Welcome to level ' + player.level + '!');
+    SFX.levelUp();
+  }
+}
+
+function useStairs(dir) {
+  if (gameState !== 'play') return;
+  const lvl = dungeon[curDepth];
+  const tile = lvl.map[player.y][player.x];
+
+  if (dir === 'down') {
+    if (tile !== T_DNSTR) { msg('There are no stairs down here.'); return; }
+    curDepth++;
+    if (!dungeon[curDepth]) generateLevel(curDepth);
+    const nlvl = dungeon[curDepth];
+    player.x = nlvl.upStair.x;
+    player.y = nlvl.upStair.y;
+    msg('You descend to level ' + curDepth + '.');
+    SFX.drop();
+  } else {
+    if (tile !== T_UPSTR) { msg('There are no stairs up here.'); return; }
+    if (curDepth === 1) {
+      if (hasAmulet) {
+        gameState = 'win';
+        msg('You escaped with the Amulet of Yendor! YOU WIN!');
+        SFX.win();
+        draw();
+        return;
+      } else {
+        msg('You see sunlight above, but your quest is incomplete.');
+        return;
+      }
+    }
+    curDepth--;
+    if (!dungeon[curDepth]) generateLevel(curDepth);
+    const nlvl = dungeon[curDepth];
+    // Place at down stair of the level above
+    if (nlvl.dnStair) {
+      player.x = nlvl.dnStair.x;
+      player.y = nlvl.dnStair.y;
+    }
+    msg('You ascend to level ' + curDepth + '.');
+    SFX.drop();
+  }
+  computeFOV();
+  draw();
+}
+
+// ── Inventory actions ──────────────────────────────────────────────────────
+function quaffPotion(idx) {
+  const it = inventory[idx];
+  if (!it || it.type !== 'potion') { msg('That is not a potion.'); return; }
+  inventory.splice(idx, 1);
+  identPotions[it.subIdx] = true;
+  const name = it.name;
+  msg('You quaff the potion of ' + name + '.');
+  SFX.powerUp();
+
+  switch (name) {
+    case 'healing':
+      player.hp = Math.min(player.hp + rngRange(5, 12), player.maxHp);
+      msg('You feel better.');
+      break;
+    case 'extra healing':
+      player.hp = player.maxHp;
+      msg('You feel much better!');
+      break;
+    case 'poison':
+      player.str = Math.max(3, player.str - rngRange(1, 3));
+      msg('You feel very sick!');
+      SFX.loseLife();
+      break;
+    case 'strength':
+      player.str += 1; player.maxStr += 1;
+      msg('You feel stronger!');
+      break;
+    case 'restore strength':
+      player.str = player.maxStr;
+      msg('Your strength returns to normal.');
+      break;
+    case 'blindness':
+      player.blind = rngRange(20, 40);
+      msg('A veil of darkness falls around you!');
+      SFX.loseLife();
+      break;
+    case 'confusion':
+      player.confused = rngRange(10, 25);
+      msg('You feel dizzy and confused.');
+      SFX.loseLife();
+      break;
+    case 'see invisible':
+      player.seeInvis = 100;
+      msg('Your eyes tingle.');
+      break;
+    case 'raise level':
+      player.xp = getXpForLevel(player.level + 1);
+      checkLevelUp();
+      break;
+    case 'haste self':
+      player.haste = rngRange(15, 30);
+      msg('You feel yourself moving faster!');
+      break;
+  }
+  endTurn();
+}
+
+function getXpForLevel(lv) {
+  const t = [0,10,30,70,150,300,600,1200,2400,4800,10000];
+  return lv < t.length ? t[lv - 1] : 10000;
+}
+
+function readScroll(idx) {
+  const it = inventory[idx];
+  if (!it || it.type !== 'scroll') { msg('That is not a scroll.'); return; }
+  inventory.splice(idx, 1);
+  identScrolls[it.subIdx] = true;
+  const name = it.name;
+  msg('You read the scroll of ' + name + '.');
+  SFX.powerUp();
+  const lvl = dungeon[curDepth];
+
+  switch (name) {
+    case 'identify':
+      // Identify a random unidentified item
+      const unident = inventory.filter(i => (i.type === 'weapon' || i.type === 'armor') && !i.identified);
+      if (unident.length > 0) { pick(unident).identified = true; msg('You feel more knowledgeable.'); }
+      else msg('You feel a strange sense of knowledge.');
+      break;
+    case 'enchant weapon':
+      if (player.weapon) { player.weapon.bonus++; player.weapon.identified = true; msg('Your weapon glows blue for a moment!'); }
+      break;
+    case 'enchant armor':
+      if (player.armor) {
+        player.armor.bonus++; player.armor.identified = true;
+        player.ac = player.armor.subtype.ac - player.armor.bonus;
+        msg('Your armor glows silver for a moment!');
+      }
+      break;
+    case 'remove curse':
+      msg('You feel as if somebody is watching over you.');
+      break;
+    case 'teleportation': {
+      const room = pick(lvl.rooms);
+      const pos = roomFloorTile(lvl, room);
+      player.x = pos.x; player.y = pos.y;
+      msg('You find yourself somewhere else!');
+      break;
+    }
+    case 'scare monster':
+      msg('You hear maniacal laughter in the distance.');
+      break;
+    case 'sleep':
+      msg('You fall asleep...');
+      // Skip a few turns (monsters move)
+      for (let i = 0; i < rngRange(3, 6); i++) monsterTurn();
+      break;
+    case 'create monster': {
+      const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+      for (const [dx,dy] of dirs) {
+        const nx = player.x+dx, ny = player.y+dy;
+        if (ny >= 0 && ny < MAP_H && nx >= 0 && nx < MAP_W && isWalkable(lvl, nx, ny)) {
+          const def = pick(MONSTER_DEFS.filter(d => d.minLv <= curDepth + 3));
+          lvl.monsters.push({
+            x:nx, y:ny, ch:def.ch, name:def.name,
+            hp:def.hp, maxHp:def.hp, dmg:[...def.dmg], ac:def.ac, xp:def.xp,
+            col:def.col, flags:[...def.flags], sleeping:false,
+          });
+          break;
+        }
+      }
+      msg('A monster appears!');
+      break;
+    }
+    case 'aggravate monster':
+      for (const m of lvl.monsters) m.sleeping = false;
+      msg('You hear a high-pitched humming noise.');
+      break;
+    case 'magic mapping':
+      for (let y = 0; y < MAP_H; y++)
+        for (let x = 0; x < MAP_W; x++)
+          if (lvl.map[y][x] !== T_NONE) seenTiles[curDepth][y][x] = true;
+      msg('The dungeon map appears in your mind!');
+      break;
+  }
+  endTurn();
+}
+
+function eatFood(idx) {
+  const it = inventory[idx];
+  if (!it || it.type !== 'food') { msg('That is not food.'); return; }
+  inventory.splice(idx, 1);
+  player.food = Math.min(player.food + rngRange(700, 1000), 2000);
+  msg('You eat the ' + it.name + '. Yum!');
+  SFX.eat();
+  endTurn();
+}
+
+function wieldWeapon(idx) {
+  const it = inventory[idx];
+  if (!it || it.type !== 'weapon') { msg('That is not a weapon.'); return; }
+  player.weapon = it;
+  msg('You are now wielding ' + itemName(it) + '.');
+  endTurn();
+}
+
+function wearArmor(idx) {
+  const it = inventory[idx];
+  if (!it || it.type !== 'armor') { msg('That is not armor.'); return; }
+  player.armor = it;
+  player.ac = it.subtype.ac - it.bonus;
+  msg('You are now wearing ' + itemName(it) + '.');
+  endTurn();
+}
+
+function dropItem(idx) {
+  const it = inventory[idx];
+  if (!it) return;
+  if (it === player.weapon) player.weapon = null;
+  if (it === player.armor) { player.armor = null; player.ac = 10; }
+  inventory.splice(idx, 1);
+  const lvl = dungeon[curDepth];
+  it.x = player.x; it.y = player.y;
+  lvl.items.push(it);
+  msg('You drop ' + itemName(it) + '.');
+  endTurn();
+}
+
+// ── Turn processing ────────────────────────────────────────────────────────
+function endTurn() {
+  turnCount++;
+  // Hunger
+  player.food -= 1;
+  if (player.food <= 0) {
+    player.hp -= 1;
+    if (turnCount % 5 === 0) msg('You faint from hunger!');
+  } else if (player.food < 150 && turnCount % 20 === 0) {
+    msg('You are getting hungry.');
+  }
+
+  // Decrement status effects
+  if (player.blind > 0) player.blind--;
+  if (player.confused > 0) player.confused--;
+  if (player.haste > 0) player.haste--;
+  if (player.seeInvis > 0) player.seeInvis--;
+
+  monsterTurn();
+
+  // Haste: extra monster turn when not hasted
+  // (original: haste gives you double speed effectively)
+
+  if (player.hp <= 0) {
+    gameState = 'dead';
+    msg('You died on level ' + curDepth + ' with ' + player.gold + ' gold.');
+    SFX.gameOver();
+  }
+
+  computeFOV();
+  draw();
+}
+
+function isWalkable(lvl, x, y) {
+  const t = lvl.map[y][x];
+  return t === T_FLOOR || t === T_CORR || t === T_DOOR || t === T_UPSTR || t === T_DNSTR;
+}
+
+function monsterTurn() {
+  const lvl = dungeon[curDepth];
+  for (const mon of lvl.monsters) {
+    if (mon.hp <= 0) continue;
+
+    // Regen for trolls
+    if (mon.flags.includes('regen') && mon.hp < mon.maxHp) mon.hp++;
+
+    if (mon.sleeping) {
+      // Wake up if player is close
+      const dist = Math.abs(mon.x - player.x) + Math.abs(mon.y - player.y);
+      if (dist <= 3 && rng(3) === 0) mon.sleeping = false;
+      continue;
+    }
+
+    const dist = Math.abs(mon.x - player.x) + Math.abs(mon.y - player.y);
+    if (dist > 15) continue; // too far to act
+
+    // Adjacent = attack
+    if (dist === 1 || (Math.abs(mon.x-player.x) <= 1 && Math.abs(mon.y-player.y) <= 1 && dist <= 2)) {
+      if (Math.abs(mon.x-player.x) <= 1 && Math.abs(mon.y-player.y) <= 1) {
+        monsterAttack(mon);
+        continue;
+      }
+    }
+
+    // Move toward player
+    let dx = 0, dy = 0;
+    if (mon.flags.includes('erratic') && rng(3) > 0) {
+      // Bat: random movement
+      dx = rngRange(-1, 1);
+      dy = rngRange(-1, 1);
+    } else {
+      dx = Math.sign(player.x - mon.x);
+      dy = Math.sign(player.y - mon.y);
+    }
+
+    // Try to move (prefer dx, then dy, then combined)
+    const moves = [[dx,dy],[dx,0],[0,dy]].filter(([a,b]) => a !== 0 || b !== 0);
+    for (const [mx,my] of moves) {
+      const nx = mon.x + mx, ny = mon.y + my;
+      if (nx < 0 || nx >= MAP_W || ny < 0 || ny >= MAP_H) continue;
+      if (!isWalkable(lvl, nx, ny)) continue;
+      if (nx === player.x && ny === player.y) { monsterAttack(mon); break; }
+      if (lvl.monsters.find(m => m !== mon && m.x === nx && m.y === ny)) continue;
+      mon.x = nx; mon.y = ny;
+      break;
+    }
+  }
+}
+
+function monsterAttack(mon) {
+  const hitRoll = rngRange(1, 20);
+  const needed = Math.max(2, player.ac - Math.floor(mon.xp / 20));
+  if (hitRoll < needed && hitRoll !== 20) {
+    msg('The ' + mon.name + ' misses you.');
+    return;
+  }
+
+  let dmg = Math.max(1, rollDice(mon.dmg[0], mon.dmg[1]));
+  player.hp -= dmg;
+  msg('The ' + mon.name + ' hits you for ' + dmg + ' damage!');
+  SFX.loseLife();
+
+  // Special abilities
+  if (mon.flags.includes('poison') && rng(3) === 0) {
+    player.str = Math.max(3, player.str - 1);
+    msg('You feel weaker from the poison!');
+  }
+  if (mon.flags.includes('drain') && rng(4) === 0) {
+    if (player.xp > 0) player.xp = Math.max(0, player.xp - mon.xp);
+    msg('You feel drained!');
+  }
+  if (mon.flags.includes('rust') && player.armor && rng(3) === 0) {
+    if (player.armor.bonus > -3) {
+      player.armor.bonus--;
+      player.ac = player.armor.subtype.ac - player.armor.bonus;
+      msg('Your armor corrodes!');
+    }
+  }
+  if (mon.flags.includes('steal')) {
+    const stealable = inventory.filter(it => it !== player.weapon && it !== player.armor);
+    if (stealable.length > 0) {
+      const stolen = pick(stealable);
+      inventory = inventory.filter(i => i !== stolen);
+      msg('The ' + mon.name + ' steals your ' + itemName(stolen) + '!');
+      // Nymph vanishes
+      const lvl = dungeon[curDepth];
+      lvl.monsters = lvl.monsters.filter(m => m !== mon);
+    }
+  }
+  if (mon.flags.includes('fire') && rng(3) === 0) {
+    const fireDmg = rngRange(2, 8);
+    player.hp -= fireDmg;
+    msg('The dragon breathes fire! (' + fireDmg + ' damage)');
+  }
+  if (mon.flags.includes('freeze') && rng(4) === 0) {
+    msg('You are frozen in place!');
+    // Skip player next turn effectively (monster gets free hit)
+  }
+}
+
+// ── Pathfinding (for tap-to-move) ──────────────────────────────────────────
+function findPath(sx, sy, tx, ty) {
+  const lvl = dungeon[curDepth];
+  if (!isWalkable(lvl, tx, ty) && !(lvl.monsters.find(m => m.x === tx && m.y === ty))) return [];
+  const key = (x,y) => x + ',' + y;
+  const open = [{x:sx, y:sy, g:0, f:0, parent:null}];
+  const closed = new Set();
+  const best = {};
+  best[key(sx,sy)] = 0;
+
+  while (open.length > 0) {
+    open.sort((a,b) => a.f - b.f);
+    const cur = open.shift();
+    if (cur.x === tx && cur.y === ty) {
+      // Reconstruct
+      const path = [];
+      let n = cur;
+      while (n.parent) { path.unshift({x:n.x,y:n.y}); n = n.parent; }
+      return path;
+    }
+    closed.add(key(cur.x, cur.y));
+    for (const [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+      const nx = cur.x+dx, ny = cur.y+dy;
+      if (nx < 0 || nx >= MAP_W || ny < 0 || ny >= MAP_H) continue;
+      if (closed.has(key(nx,ny))) continue;
+      if (!isWalkable(lvl, nx, ny) && !(nx === tx && ny === ty)) continue;
+      const ng = cur.g + 1;
+      if (best[key(nx,ny)] !== undefined && best[key(nx,ny)] <= ng) continue;
+      best[key(nx,ny)] = ng;
+      const h = Math.abs(nx-tx) + Math.abs(ny-ty);
+      open.push({x:nx, y:ny, g:ng, f:ng+h, parent:cur});
+    }
+  }
+  return [];
+}
+
+// ── Rendering ──────────────────────────────────────────────────────────────
+let cellW, cellH, offsetX, offsetY, fontSize;
+
+function calcGrid() {
+  const w = canvas.width, h = canvas.height;
+  const statusH = 2; // lines for status
+  const totalH = MAP_H + MSG_LINES + statusH;
+  cellW = Math.floor(w / MAP_W);
+  cellH = Math.floor(h / totalH);
+  const cell = Math.min(cellW, cellH);
+  cellW = cell;
+  cellH = cell;
+  fontSize = Math.floor(cell * 0.85);
+  offsetX = Math.floor((w - MAP_W * cellW) / 2);
+  offsetY = MSG_LINES * cellH;
+}
+
+function draw() {
+  calcGrid();
+  const w = canvas.width, h = canvas.height;
+  ctx.fillStyle = C.black;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.font = fontSize + 'px Consolas, "Courier New", monospace';
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+
+  // Draw messages (top)
+  const recent = messages.slice(-MSG_LINES);
+  ctx.font = Math.floor(fontSize * 0.8) + 'px Consolas, "Courier New", monospace';
+  for (let i = 0; i < recent.length; i++) {
+    ctx.fillStyle = i === recent.length - 1 ? C.white : C.gray;
+    ctx.fillText(recent[i], w / 2, i * cellH + 2, w - 10);
+  }
+  ctx.font = fontSize + 'px Consolas, "Courier New", monospace';
+
+  if (gameState === 'dead' || gameState === 'win') {
+    drawMap();
+    drawOverlay();
+    drawStatusBar();
+    drawDpad();
+    drawScanlines();
+    return;
+  }
+
+  if (showInventory) {
+    drawInventoryScreen();
+    drawScanlines();
+    return;
+  }
+
+  drawMap();
+  drawStatusBar();
+  drawDpad();
+  drawButtons();
+  drawScanlines();
+}
+
+function drawMap() {
+  const lvl = dungeon[curDepth];
+  if (!lvl) return;
+
+  for (let y = 0; y < MAP_H; y++) {
+    for (let x = 0; x < MAP_W; x++) {
+      const sx = offsetX + x * cellW + cellW / 2;
+      const sy = offsetY + y * cellH;
+
+      if (visible[y] && visible[y][x]) {
+        // Check for monster
+        const mon = lvl.monsters.find(m => m.x === x && m.y === y && m.hp > 0);
+        if (x === player.x && y === player.y) {
+          ctx.fillStyle = C.yellow;
+          ctx.fillText('@', sx, sy);
+          continue;
+        }
+        if (mon) {
+          ctx.fillStyle = mon.col;
+          ctx.fillText(mon.ch, sx, sy);
+          continue;
+        }
+        // Check for item
+        const item = lvl.items.find(it => it.x === x && it.y === y);
+        if (item) {
+          ctx.fillStyle = item.col;
+          ctx.fillText(item.ch, sx, sy);
+          continue;
+        }
+        // Tile
+        drawTile(lvl.map[y][x], sx, sy);
+      } else if (seenTiles[curDepth] && seenTiles[curDepth][y] && seenTiles[curDepth][y][x]) {
+        // Seen but not visible: dim
+        ctx.globalAlpha = 0.3;
+        drawTile(lvl.map[y][x], sx, sy);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+}
+
+function drawTile(tile, sx, sy) {
+  switch (tile) {
+    case T_WALL:
+      ctx.fillStyle = C.gray;
+      ctx.fillText('#', sx, sy);
+      break;
+    case T_FLOOR:
+      ctx.fillStyle = C.dkgray;
+      ctx.fillText('.', sx, sy);
+      break;
+    case T_CORR:
+      ctx.fillStyle = C.dkgray;
+      ctx.fillText('#', sx, sy);
+      break;
+    case T_DOOR:
+      ctx.fillStyle = C.brown;
+      ctx.fillText('+', sx, sy);
+      break;
+    case T_DNSTR:
+      ctx.fillStyle = C.white;
+      ctx.fillText('>', sx, sy);
+      break;
+    case T_UPSTR:
+      ctx.fillStyle = C.white;
+      ctx.fillText('<', sx, sy);
+      break;
+  }
+}
+
+function drawStatusBar() {
+  const y = offsetY + MAP_H * cellH + 4;
+  const fs = Math.floor(fontSize * 0.75);
+  ctx.font = fs + 'px Consolas, "Courier New", monospace';
+  ctx.textAlign = 'left';
+
+  const hungerStr = player.food < 150 ? ' HUNGRY' : player.food <= 0 ? ' STARVING' : '';
+  const blindStr = player.blind > 0 ? ' Blind' : '';
+  const confStr = player.confused > 0 ? ' Conf' : '';
+  const hasteStr = player.haste > 0 ? ' Haste' : '';
+
+  const line1 = 'Level:' + curDepth + '  HP:' + player.hp + '/' + player.maxHp +
+    '  STR:' + player.str + '  AC:' + player.ac + '  Gold:' + player.gold;
+  const line2 = 'Lv:' + player.level + '  XP:' + player.xp +
+    (player.weapon ? '  Wpn:' + itemName(player.weapon) : '') +
+    hungerStr + blindStr + confStr + hasteStr;
+
+  ctx.fillStyle = C.white;
+  ctx.fillText(line1, 6, y);
+  ctx.fillStyle = C.gray;
+  ctx.fillText(line2, 6, y + fs + 2);
+  ctx.textAlign = 'center';
+  ctx.font = fontSize + 'px Consolas, "Courier New", monospace';
+}
+
+function drawOverlay() {
+  const w = canvas.width, h = canvas.height;
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.textAlign = 'center';
+
+  if (gameState === 'win') {
+    ctx.fillStyle = C.yellow;
+    ctx.font = (fontSize * 2) + 'px Consolas, "Courier New", monospace';
+    ctx.fillText('*** YOU WIN ***', w/2, h/3);
+    ctx.font = fontSize + 'px Consolas, "Courier New", monospace';
+    ctx.fillStyle = C.white;
+    ctx.fillText('You escaped with the Amulet of Yendor!', w/2, h/3 + fontSize*3);
+    ctx.fillText('Gold: ' + player.gold + '  Level: ' + player.level + '  Depth reached: ' + MAX_DEPTH, w/2, h/3 + fontSize*5);
+    ctx.fillStyle = C.gray;
+    ctx.fillText('Tap to play again', w/2, h/3 + fontSize*7);
+  } else {
+    ctx.fillStyle = C.red;
+    ctx.font = (fontSize * 2) + 'px Consolas, "Courier New", monospace';
+    ctx.fillText('*** YOU DIED ***', w/2, h/3);
+    ctx.font = fontSize + 'px Consolas, "Courier New", monospace';
+    ctx.fillStyle = C.gray;
+    ctx.fillText('Killed on level ' + curDepth, w/2, h/3 + fontSize*3);
+    ctx.fillText('Gold: ' + player.gold + '  XP: ' + player.xp + '  Turns: ' + turnCount, w/2, h/3 + fontSize*5);
+    ctx.fillStyle = C.dkgray;
+    ctx.fillText('Tap to try again', w/2, h/3 + fontSize*7);
+  }
+}
+
+function drawInventoryScreen() {
+  const w = canvas.width, h = canvas.height;
+  ctx.fillStyle = 'rgba(0,0,10,0.95)';
+  ctx.fillRect(0, 0, w, h);
+
+  const fs = Math.floor(fontSize * 0.8);
+  ctx.font = fs + 'px Consolas, "Courier New", monospace';
+  ctx.textAlign = 'left';
+
+  let title = '=== INVENTORY ===';
+  if (invAction === 'quaff') title = '=== QUAFF WHICH POTION? ===';
+  else if (invAction === 'read') title = '=== READ WHICH SCROLL? ===';
+  else if (invAction === 'eat') title = '=== EAT WHAT? ===';
+  else if (invAction === 'wield') title = '=== WIELD WHICH WEAPON? ===';
+  else if (invAction === 'wear') title = '=== WEAR WHICH ARMOR? ===';
+  else if (invAction === 'drop') title = '=== DROP WHAT? ===';
+
+  ctx.fillStyle = C.yellow;
+  ctx.fillText(title, 10, 10);
+
+  const lineH = fs + 4;
+  const startY = 10 + lineH * 2;
+  const colW = w / 2;
+
+  for (let i = 0; i < inventory.length; i++) {
+    const it = inventory[i];
+    const col = Math.floor(i / 12);
+    const row = i % 12;
+    const x = 10 + col * colW;
+    const y = startY + row * lineH;
+    const letter = String.fromCharCode(97 + i); // a, b, c...
+
+    let equipped = '';
+    if (it === player.weapon) equipped = ' (wielded)';
+    if (it === player.armor) equipped = ' (worn)';
+
+    // Highlight applicable items
+    let dimmed = false;
+    if (invAction === 'quaff' && it.type !== 'potion') dimmed = true;
+    if (invAction === 'read' && it.type !== 'scroll') dimmed = true;
+    if (invAction === 'eat' && it.type !== 'food') dimmed = true;
+    if (invAction === 'wield' && it.type !== 'weapon') dimmed = true;
+    if (invAction === 'wear' && it.type !== 'armor') dimmed = true;
+
+    ctx.fillStyle = dimmed ? C.dkgray : C.white;
+    ctx.fillText(letter + ') ' + itemName(it) + equipped, x, y);
+
+    // Draw item slot touch target (store for tap detection)
+    inventory[i]._tx = x; inventory[i]._ty = y; inventory[i]._tw = colW - 20; inventory[i]._th = lineH;
+  }
+
+  if (inventory.length === 0) {
+    ctx.fillStyle = C.gray;
+    ctx.fillText('Your pack is empty.', 10, startY);
+  }
+
+  ctx.fillStyle = C.dkgray;
+  ctx.fillText('[ESC/tap outside] close   [w]ield  [W]ear  [d]rop  [q]uaff  [r]ead  [e]at', 10, h - lineH);
+}
+
+// ── D-pad and buttons ──────────────────────────────────────────────────────
+const dpadBtns = [];
+const actionBtns = [];
+
+function drawDpad() {
+  dpadBtns.length = 0;
+  const w = canvas.width, h = canvas.height;
+  const sz = Math.min(42, Math.floor(w * 0.065));
+  const gap = 2;
+  const bx = sz + 10;
+  const by = h - sz * 3 - 20;
+
+  ctx.globalAlpha = 0.25;
+  const dirs = [
+    { dx:0,  dy:-1, x:bx,        y:by },         // up
+    { dx:-1, dy:0,  x:bx-sz-gap,  y:by+sz+gap },  // left
+    { dx:1,  dy:0,  x:bx+sz+gap,  y:by+sz+gap },  // right
+    { dx:0,  dy:1,  x:bx,        y:by+2*(sz+gap) }, // down
+  ];
+  for (const d of dirs) {
+    ctx.fillStyle = C.dkgray;
+    ctx.fillRect(d.x, d.y, sz, sz);
+    dpadBtns.push({ x:d.x, y:d.y, w:sz, h:sz, dx:d.dx, dy:d.dy });
+    // Arrow symbol
+    ctx.fillStyle = C.gray;
+    ctx.font = Math.floor(sz*0.5) + 'px Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const arrows = {'-1,0':'\u25C4','1,0':'\u25BA','0,-1':'\u25B2','0,1':'\u25BC'};
+    ctx.fillText(arrows[d.dx+','+d.dy], d.x+sz/2, d.y+sz/2);
+  }
+  ctx.globalAlpha = 1;
+  ctx.textBaseline = 'top';
+}
+
+function drawButtons() {
+  actionBtns.length = 0;
+  const w = canvas.width, h = canvas.height;
+  const bw = Math.min(36, Math.floor(w * 0.055));
+  const bh = bw;
+  const gap = 4;
+  const startX = w - bw - 8;
+  const startY = h - (bh + gap) * 5 - 8;
+
+  const btns = [
+    { label:'i', action:'inv' },
+    { label:'>', action:'down' },
+    { label:'<', action:'up' },
+    { label:'q', action:'quaff' },
+    { label:'r', action:'read' },
+    { label:'e', action:'eat' },
+    { label:'?', action:'help' },
+  ];
+
+  ctx.globalAlpha = 0.3;
+  for (let i = 0; i < btns.length; i++) {
+    const x = startX;
+    const y = startY + i * (bh + gap);
+    ctx.fillStyle = C.dkgray;
+    ctx.fillRect(x, y, bw, bh);
+    ctx.fillStyle = C.white;
+    ctx.font = Math.floor(bw * 0.5) + 'px Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(btns[i].label, x + bw/2, y + bh/2);
+    actionBtns.push({ x, y, w:bw, h:bh, action:btns[i].action });
+  }
+  ctx.globalAlpha = 1;
+  ctx.textBaseline = 'top';
+}
+
+function drawScanlines() {
+  ctx.globalAlpha = 0.03;
+  ctx.fillStyle = '#000';
+  for (let y = 0; y < canvas.height; y += 3) {
+    ctx.fillRect(0, y, canvas.width, 1);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ── Input handling ─────────────────────────────────────────────────────────
+let touchStartX, touchStartY, touchStartTime;
+
+document.addEventListener('keydown', (e) => {
+  if (gameState === 'dead' || gameState === 'win') {
+    initGame();
+    return;
+  }
+
+  if (showInventory) {
+    handleInventoryKey(e.key);
+    return;
+  }
+
+  const key = e.key;
+  switch (key) {
+    case 'ArrowUp': case 'k': tryMove(0, -1); break;
+    case 'ArrowDown': case 'j': tryMove(0, 1); break;
+    case 'ArrowLeft': case 'h': tryMove(-1, 0); break;
+    case 'ArrowRight': case 'l': tryMove(1, 0); break;
+    case 'y': tryMove(-1, -1); break;
+    case 'u': tryMove(1, -1); break;
+    case 'b': tryMove(-1, 1); break;
+    case 'n': tryMove(1, 1); break;
+    case '.': endTurn(); break; // wait
+    case '>': useStairs('down'); break;
+    case '<': useStairs('up'); break;
+    case 'i': showInventory = true; invAction = null; draw(); break;
+    case 'q': showInventory = true; invAction = 'quaff'; draw(); break;
+    case 'r': showInventory = true; invAction = 'read'; draw(); break;
+    case 'e': showInventory = true; invAction = 'eat'; draw(); break;
+    case 'w': showInventory = true; invAction = 'wield'; draw(); break;
+    case 'W': showInventory = true; invAction = 'wear'; draw(); break;
+    case 'd': showInventory = true; invAction = 'drop'; draw(); break;
+    case '?': showHelpMessage(); break;
+    case 's': // search
+      msg('You search around you...');
+      endTurn();
+      break;
+    case 'Escape':
+      showInventory = false; invAction = null; draw();
+      break;
+  }
+  e.preventDefault();
+});
+
+function handleInventoryKey(key) {
+  if (key === 'Escape' || key === 'i') {
+    showInventory = false; invAction = null; draw(); return;
+  }
+  // Sub-action keys while in inventory
+  if (!invAction) {
+    if (key === 'q') { invAction = 'quaff'; draw(); return; }
+    if (key === 'r') { invAction = 'read'; draw(); return; }
+    if (key === 'e') { invAction = 'eat'; draw(); return; }
+    if (key === 'w') { invAction = 'wield'; draw(); return; }
+    if (key === 'W') { invAction = 'wear'; draw(); return; }
+    if (key === 'd') { invAction = 'drop'; draw(); return; }
+  }
+  // Letter selection
+  const idx = key.charCodeAt(0) - 97;
+  if (idx >= 0 && idx < inventory.length) {
+    performInvAction(idx);
+  }
+}
+
+function performInvAction(idx) {
+  showInventory = false;
+  if (!invAction) {
+    // Just viewing, show item info
+    msg(itemName(inventory[idx]));
+    draw();
+    return;
+  }
+  switch (invAction) {
+    case 'quaff': quaffPotion(idx); break;
+    case 'read': readScroll(idx); break;
+    case 'eat': eatFood(idx); break;
+    case 'wield': wieldWeapon(idx); break;
+    case 'wear': wearArmor(idx); break;
+    case 'drop': dropItem(idx); break;
+  }
+  invAction = null;
+}
+
+function showHelpMessage() {
+  messages.push('--- HELP ---');
+  messages.push('Move: arrows/hjkl/swipe  Attack: walk into monsters');
+  messages.push('i=inventory q=quaff r=read e=eat w=wield W=wear d=drop');
+  messages.push('>=descend <=ascend .=wait s=search ?=help');
+  messages.push('Goal: reach level 26, get the Amulet, return to level 1');
+  draw();
+}
+
+// Touch input
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+  touchStartTime = Date.now();
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (!touchStartX) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const elapsed = Date.now() - touchStartTime;
+
+  if (gameState === 'dead' || gameState === 'win') {
+    initGame();
+    return;
+  }
+
+  // Check button taps first
+  const tx = t.clientX, ty = t.clientY;
+
+  if (showInventory) {
+    // Check if tapping an inventory item
+    for (let i = 0; i < inventory.length; i++) {
+      const it = inventory[i];
+      if (it._tx !== undefined && tx >= it._tx && tx <= it._tx + it._tw && ty >= it._ty && ty <= it._ty + it._th) {
+        performInvAction(i);
+        return;
+      }
+    }
+    // Tap outside = close
+    showInventory = false; invAction = null; draw();
+    return;
+  }
+
+  // D-pad
+  for (const btn of dpadBtns) {
+    if (tx >= btn.x && tx <= btn.x + btn.w && ty >= btn.y && ty <= btn.y + btn.h) {
+      tryMove(btn.dx, btn.dy);
+      return;
+    }
+  }
+
+  // Action buttons
+  for (const btn of actionBtns) {
+    if (tx >= btn.x && tx <= btn.x + btn.w && ty >= btn.y && ty <= btn.y + btn.h) {
+      switch (btn.action) {
+        case 'inv': showInventory = true; invAction = null; draw(); return;
+        case 'down': useStairs('down'); return;
+        case 'up': useStairs('up'); return;
+        case 'quaff': showInventory = true; invAction = 'quaff'; draw(); return;
+        case 'read': showInventory = true; invAction = 'read'; draw(); return;
+        case 'eat': showInventory = true; invAction = 'eat'; draw(); return;
+        case 'help': showHelpMessage(); return;
+      }
+      return;
+    }
+  }
+
+  // Swipe
+  if (dist > 25 && elapsed < 500) {
+    const angle = Math.atan2(dy, dx);
+    const pi = Math.PI;
+    if (angle > -pi/4 && angle <= pi/4) tryMove(1, 0);
+    else if (angle > pi/4 && angle <= 3*pi/4) tryMove(0, 1);
+    else if (angle > -3*pi/4 && angle <= -pi/4) tryMove(0, -1);
+    else tryMove(-1, 0);
+    return;
+  }
+
+  // Tap on map -> pathfind
+  if (dist < 15) {
+    const mapX = Math.floor((tx - offsetX) / cellW);
+    const mapY = Math.floor((ty - offsetY) / cellH);
+    if (mapX >= 0 && mapX < MAP_W && mapY >= 0 && mapY < MAP_H) {
+      if (mapX === player.x && mapY === player.y) {
+        // Tap self = wait
+        endTurn();
+        return;
+      }
+      const path = findPath(player.x, player.y, mapX, mapY);
+      if (path.length > 0) {
+        // Take first step
+        const step = path[0];
+        tryMove(step.x - player.x, step.y - player.y);
+      }
+    }
+  }
+}, { passive: false });
+
+// Mouse support for desktop
+canvas.addEventListener('mousedown', (e) => {
+  touchStartX = e.clientX;
+  touchStartY = e.clientY;
+  touchStartTime = Date.now();
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (!touchStartX) return;
+  const dx = e.clientX - touchStartX;
+  const dy = e.clientY - touchStartY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const tx = e.clientX, ty = e.clientY;
+
+  if (gameState === 'dead' || gameState === 'win') {
+    initGame();
+    return;
+  }
+
+  if (showInventory) {
+    for (let i = 0; i < inventory.length; i++) {
+      const it = inventory[i];
+      if (it._tx !== undefined && tx >= it._tx && tx <= it._tx + it._tw && ty >= it._ty && ty <= it._ty + it._th) {
+        performInvAction(i);
+        return;
+      }
+    }
+    showInventory = false; invAction = null; draw();
+    return;
+  }
+
+  for (const btn of dpadBtns) {
+    if (tx >= btn.x && tx <= btn.x + btn.w && ty >= btn.y && ty <= btn.y + btn.h) {
+      tryMove(btn.dx, btn.dy);
+      return;
+    }
+  }
+  for (const btn of actionBtns) {
+    if (tx >= btn.x && tx <= btn.x + btn.w && ty >= btn.y && ty <= btn.y + btn.h) {
+      switch (btn.action) {
+        case 'inv': showInventory = true; invAction = null; draw(); return;
+        case 'down': useStairs('down'); return;
+        case 'up': useStairs('up'); return;
+        case 'quaff': showInventory = true; invAction = 'quaff'; draw(); return;
+        case 'read': showInventory = true; invAction = 'read'; draw(); return;
+        case 'eat': showInventory = true; invAction = 'eat'; draw(); return;
+        case 'help': showHelpMessage(); return;
+      }
+      return;
+    }
+  }
+
+  // Click on map
+  if (dist < 10) {
+    const mapX = Math.floor((tx - offsetX) / cellW);
+    const mapY = Math.floor((ty - offsetY) / cellH);
+    if (mapX >= 0 && mapX < MAP_W && mapY >= 0 && mapY < MAP_H) {
+      if (mapX === player.x && mapY === player.y) { endTurn(); return; }
+      const path = findPath(player.x, player.y, mapX, mapY);
+      if (path.length > 0) {
+        const step = path[0];
+        tryMove(step.x - player.x, step.y - player.y);
+      }
+    }
+  }
+});
+
+// ── Game start ─────────────────────────────────────────────────────────────
+function startGame() {
+  identPotions = {};
+  identScrolls = {};
+  initGame();
+}
+
+if (window._gameReady) {
+  startGame();
+} else {
+  window.addEventListener('gameready', startGame);
+}
+
+</script>
+</body></html>

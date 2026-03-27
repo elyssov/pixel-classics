@@ -444,7 +444,7 @@
       <div class="nc-panel-header">C:\GAMES</div>
       <div class="nc-panel-cols"><span>Name</span><span>Size</span><span>Date</span></div>
       <div class="nc-panel-body" id="left-panel"></div>
-      <div class="nc-panel-footer" id="left-footer">GAMES: 13 files, 4,096K</div>
+      <div class="nc-panel-footer" id="left-footer">GAMES: 14 files, 4,096K</div>
     </div>
 
     <!-- Right Panel: C:\ (decorative) -->
@@ -458,7 +458,7 @@
 
   <!-- Status -->
   <div class="nc-status">
-    <span>C:\GAMES\ v2.0</span>
+    <span>C:\GAMES\ v3.0</span>
     <span><span class="sync">&#9679;</span> Score sync &mdash; 0 nearby</span>
     <span id="nc-clock"></span>
   </div>
@@ -494,6 +494,7 @@ const games = [
   { name: "RIVERAID", ext: "EXE", size: "48,128",  date: "11-10-82", file: "river_raid.html" },
   { name: "FROGGER",  ext: "EXE", size: "32,256",  date: "09-05-81", file: "frogger.html" },
   { name: "ET",       ext: "EXE", size: "8,192",   date: "12-01-82", file: "et.html" },
+  { name: "ROGUE",    ext: "EXE", size: "65,536",  date: "06-15-80", file: "rogue.html" },
 ];
 
 // ═══ C:\ ROOT (decorative) ═══
@@ -715,8 +716,8 @@ function updateClock() {
 }
 
 // ═══ FOTA — Over-the-Air Update from GitHub Releases ═══
-const CURRENT_VERSION = '2.0';
-const CURRENT_BUILD = 6;
+const CURRENT_VERSION = '3.0';
+const CURRENT_BUILD = 7;
 const GITHUB_REPO = 'elyssov/pixel-classics';
 
 function checkForUpdate() {
