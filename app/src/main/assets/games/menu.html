@@ -80,6 +80,8 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
   #donate-overlay .donate-box {
     border: 2px solid #00AAAA;
@@ -87,6 +89,9 @@
     padding: 12px 20px;
     max-width: 520px;
     width: 90%;
+    max-height: 90vh;
+    max-height: 90dvh;
+    overflow-y: auto;
     color: #AAA;
     font-size: 12px;
     line-height: 1.7;
@@ -320,6 +325,81 @@
     .nc-file { font-size: 11px; }
     .nc-fnkey .l { font-size: 9px; }
   }
+
+  /* ═══════════════════════════════
+     SMALL SCREEN HEIGHT (≤400px)
+     Compact NC for landscape phones
+     ═══════════════════════════════ */
+  @media (max-height: 400px) {
+    #boot-screen {
+      font-size: 11px;
+      line-height: 1.3;
+      padding: 8px;
+    }
+    #game-loader {
+      font-size: 11px;
+      line-height: 1.3;
+      padding: 8px;
+    }
+    .nc-menu {
+      padding: 0 4px;
+      font-size: 11px;
+      line-height: 1.2;
+    }
+    .nc-panels {
+      padding: 1px;
+    }
+    .nc-panel {
+      border-width: 1px;
+    }
+    .nc-panel-header {
+      padding: 0;
+      font-size: 11px;
+    }
+    .nc-panel-cols {
+      font-size: 9px;
+      padding: 0 4px;
+    }
+    .nc-file {
+      padding: 0 4px;
+      font-size: 11px;
+    }
+    .nc-file .fdate { display: none; }
+    .nc-file .fsize { width: 48px; font-size: 10px; }
+    .nc-panel-footer {
+      font-size: 9px;
+      padding: 0 4px;
+    }
+    .nc-status {
+      padding: 1px 6px;
+      font-size: 10px;
+    }
+    .nc-fnbar {
+      font-size: 11px;
+    }
+    .nc-fnkey {
+      padding: 2px 0;
+    }
+    .nc-fnkey .n { font-size: 9px; }
+    .nc-fnkey .l { font-size: 10px; padding: 0 2px; }
+    #donate-overlay .donate-box {
+      padding: 8px 12px;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    #donate-overlay .donate-title {
+      font-size: 12px;
+      margin-bottom: 6px;
+      padding-bottom: 4px;
+    }
+    #donate-overlay .donate-qr {
+      width: 100px;
+      margin: 6px auto;
+    }
+    #donate-overlay .donate-note { font-size: 10px; margin-top: 4px; }
+    #donate-overlay .donate-cc { font-size: 9px; margin-top: 4px; }
+    #donate-overlay .donate-close { margin-top: 6px; padding: 2px 16px; font-size: 11px; }
+  }
 </style>
 </head><body>
 
@@ -522,6 +602,69 @@ function showNC() {
   // Clock
   updateClock();
   setInterval(updateClock, 30000);
+
+  // ═══ NC CURSOR NAVIGATION ═══
+  let selectedIdx = 0;
+  const gameRows = () => leftPanel.querySelectorAll('.nc-file.game');
+
+  function selectGame(idx) {
+    const rows = gameRows();
+    if (idx < 0 || idx >= rows.length) return;
+    rows.forEach(r => r.classList.remove('selected'));
+    selectedIdx = idx;
+    rows[idx].classList.add('selected');
+    rows[idx].scrollIntoView({ block: 'nearest' });
+  }
+
+  function launchSelected() {
+    const g = games[selectedIdx];
+    if (g) launchGame(g.name, g.ext, g.size, g.file);
+  }
+
+  // Swipe up/down anywhere on NC to move cursor
+  let ncTouchY = null;
+  let ncTouchTime = 0;
+  let ncLastTapTime = 0;
+
+  nc.addEventListener('touchstart', e => {
+    ncTouchY = e.touches[0].clientY;
+    ncTouchTime = Date.now();
+  }, { passive: true });
+
+  nc.addEventListener('touchend', e => {
+    if (ncTouchY === null) return;
+    const dy = e.changedTouches[0].clientY - ncTouchY;
+    const dt = Date.now() - ncTouchTime;
+    ncTouchY = null;
+
+    // If it was a swipe (moved > 30px in < 400ms)
+    if (Math.abs(dy) > 30 && dt < 400) {
+      if (dy < 0) selectGame(selectedIdx + 1); // swipe up = next
+      else selectGame(selectedIdx - 1);         // swipe down = prev
+      e.preventDefault();
+      return;
+    }
+
+    // If it was a quick tap (< 200ms, < 15px movement) — check double-tap
+    if (Math.abs(dy) < 15 && dt < 200) {
+      const now = Date.now();
+      if (now - ncLastTapTime < 400) {
+        // Double-tap — launch selected game
+        launchSelected();
+        ncLastTapTime = 0;
+      } else {
+        ncLastTapTime = now;
+      }
+    }
+  }, { passive: false });
+
+  // Keyboard support
+  document.addEventListener('keydown', e => {
+    if (document.getElementById('nc-screen').style.display !== 'flex') return;
+    if (e.key === 'ArrowUp') { selectGame(selectedIdx - 1); e.preventDefault(); }
+    if (e.key === 'ArrowDown') { selectGame(selectedIdx + 1); e.preventDefault(); }
+    if (e.key === 'Enter') { launchSelected(); e.preventDefault(); }
+  });
 }
 
 function createFileRow(f, cls, clickFile) {

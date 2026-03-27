@@ -8,3 +8,4 @@ local.properties
 *.iml
 .idea/
 dist/
+app/libs/core-sources.jar

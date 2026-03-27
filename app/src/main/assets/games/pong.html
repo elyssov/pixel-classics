@@ -76,7 +76,7 @@ function update() {
   const aiSpeed = 2.5;
   const diff = b.y - state.p2.y;
   // AI has reaction delay — only tracks when ball is on its half
-  if (b.x > W() * 0.35 && Math.abs(diff) > 15) {
+  if (b.x > canvas.width * 0.35 && Math.abs(diff) > 15) {
     // AI sometimes misjudges (5% chance to hesitate)
     if (Math.random() > 0.05) {
       state.p2.y += Math.sign(diff) * Math.min(aiSpeed, Math.abs(diff) * 0.08);

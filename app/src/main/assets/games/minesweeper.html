@@ -11,24 +11,24 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    min-height: 100vh;
-    min-height: 100dvh;
+    height: 100vh;
+    overflow-y: auto;
     touch-action: none;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
-    padding: 8px;
+    padding: 4px;
   }
 
   .header {
     background: #c0c0c0;
     border: 3px solid;
     border-color: #808080 #fff #fff #808080;
-    padding: 6px 10px;
+    padding: 4px 8px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 6px;
+    gap: 8px;
+    margin-bottom: 4px;
     width: 100%;
     max-width: 500px;
   }
@@ -37,18 +37,18 @@
     background: #000;
     color: #ff0000;
     font-family: 'Consolas', 'Courier New', monospace;
-    font-size: 24px;
+    font-size: 18px;
     font-weight: bold;
-    padding: 2px 6px;
-    min-width: 50px;
+    padding: 2px 4px;
+    min-width: 42px;
     text-align: center;
     border: 2px solid;
     border-color: #808080 #fff #fff #808080;
   }
 
   .face-btn {
-    width: 36px; height: 36px;
-    font-size: 22px;
+    width: 30px; height: 30px;
+    font-size: 18px;
     border: 2px solid;
     border-color: #fff #808080 #808080 #fff;
     background: #c0c0c0;
@@ -70,14 +70,14 @@
   }
 
   .cell {
-    width: 28px; height: 28px;
+    width: var(--cell-size, 28px); height: var(--cell-size, 28px);
     border: 2px solid;
     border-color: #fff #808080 #808080 #fff;
     background: #c0c0c0;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: var(--cell-font, 14px);
     font-weight: bold;
     cursor: pointer;
   }
@@ -94,7 +94,7 @@
   .cell.flagged::after {
     content: '\u2691';
     color: #ff0000;
-    font-size: 16px;
+    font-size: var(--cell-font, 16px);
   }
 
   .cell[data-num="1"] { color: #0000ff; }
@@ -107,7 +107,7 @@
   .cell[data-num="8"] { color: #808080; }
 
   .difficulty {
-    margin-top: 8px;
+    margin-top: 4px;
     display: flex;
     gap: 6px;
   }
@@ -147,6 +147,20 @@
 <script>
 let ROWS = 9, COLS = 9, MINES = 10;
 let board, revealed, flagged, gameOver, gameWon, firstClick, timerInterval, seconds;
+
+function calcCellSize() {
+  // Reserve space for header (~46px), difficulty buttons (~30px), padding (8px)
+  const overhead = 90;
+  const availH = window.innerHeight - overhead;
+  const availW = window.innerWidth - 16;
+  const maxByH = Math.floor(availH / ROWS);
+  const maxByW = Math.floor(availW / COLS);
+  const cell = Math.min(maxByH, maxByW, 28);
+  const clamped = Math.max(cell, 14);
+  document.documentElement.style.setProperty('--cell-size', clamped + 'px');
+  document.documentElement.style.setProperty('--cell-font', Math.max(Math.floor(clamped * 0.5), 8) + 'px');
+  return clamped;
+}
 
 function setDifficulty(r, c, m, btn) {
   ROWS = r; COLS = c; MINES = m;
@@ -276,8 +290,9 @@ function updateMineCounter() {
 let longPressTimer = null;
 
 function render() {
+  const cellSize = calcCellSize();
   const boardEl = document.getElementById('board');
-  boardEl.style.gridTemplateColumns = `repeat(${COLS}, 28px)`;
+  boardEl.style.gridTemplateColumns = `repeat(${COLS}, ${cellSize}px)`;
   boardEl.innerHTML = '';
 
   for (let r = 0; r < ROWS; r++) {
