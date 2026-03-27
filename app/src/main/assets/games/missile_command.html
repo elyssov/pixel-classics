@@ -5,11 +5,42 @@
 <title>Missile Command</title>
 <style>
   * { margin: 0; padding: 0; }
-  body { background: #000; overflow: hidden; touch-action: none; }
+  html, body { background: #000; overflow: hidden; touch-action: none; height: 100%; }
   canvas { display: block; }
+  #diff-screen {
+    position: fixed; inset: 0; z-index: 100;
+    background: linear-gradient(180deg, #000020, #0a0040);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px;
+    font-family: 'Consolas', 'Courier New', monospace;
+  }
+  #diff-screen h1 { color: #FF2222; font-size: clamp(20px,5vh,36px); letter-spacing: 4px; text-transform: uppercase; }
+  #diff-screen p { color: #78909c; font-size: 12px; }
+  .diff-btn {
+    background: linear-gradient(180deg, #1a0a0a, #0d0505);
+    border: 1px solid #FF4444; color: #FF4444;
+    padding: clamp(8px,2vh,14px) 40px; font-size: clamp(14px,3vh,18px);
+    cursor: pointer; letter-spacing: 2px; text-transform: uppercase;
+    font-family: inherit;
+  }
+  .diff-btn:hover { background: #2a0a0a; box-shadow: 0 0 10px rgba(255,68,68,0.3); }
+  .diff-desc { color: #546e7a; font-size: 11px; margin-top: -8px; }
 </style>
 </head><body>
 <canvas id="c"></canvas>
+
+<!-- Difficulty Selection -->
+<div id="diff-screen">
+  <h1>Missile Command</h1>
+  <p>Choose difficulty</p>
+  <button class="diff-btn" onclick="startGame(0)">Cadet</button>
+  <div class="diff-desc">Slow missiles, small waves. Learn the ropes.</div>
+  <button class="diff-btn" onclick="startGame(1)">Commander</button>
+  <div class="diff-desc">Standard speed. The Cold War experience.</div>
+  <button class="diff-btn" onclick="startGame(2)">Armageddon</button>
+  <div class="diff-desc">Fast, relentless. Cities will burn.</div>
+</div>
+
 <script src="sound.js"></script>
 <script src="loader.js"></script>
 <script>
@@ -23,50 +54,55 @@ window.addEventListener('resize', resize);
 const W = () => canvas.width;
 const H = () => canvas.height;
 
-// Colors — Atari original palette
+// Difficulty presets: [baseSpeed, speedPerLevel, baseMissiles, missilesPerLevel]
+const DIFF = [
+  { baseSpd: 0.3, spdLvl: 0.08, baseMsl: 5, mslLvl: 2, name: 'CADET' },
+  { baseSpd: 0.5, spdLvl: 0.12, baseMsl: 8, mslLvl: 3, name: 'COMMANDER' },
+  { baseSpd: 0.8, spdLvl: 0.18, baseMsl: 12, mslLvl: 5, name: 'ARMAGEDDON' },
+];
+let diff = DIFF[1];
+
+// Colors
 const SKY_TOP = '#000020';
 const SKY_BOTTOM = '#0a0040';
 const GROUND_COLOR = '#8B6914';
 const CITY_COLOR = '#00CCFF';
 const CITY_DARK = '#006688';
-const MISSILE_COLOR = '#FF2222';
-const MISSILE_TRAIL = '#FF4444';
-const ROCKET_COLOR = '#44FF44';
-const ROCKET_TRAIL = '#22AA22';
 const EXPLOSION_INNER = '#FFFFCC';
 const EXPLOSION_MID = '#FF8800';
-const EXPLOSION_OUTER = '#FF2200';
 
-let cities, batteries, missiles, rockets, explosions, particles;
-let score, level, gameOver, waveActive, waveTimer, missilesThisWave, missilesLaunched;
+let cities, batteries, missiles, rockets, explosions, particles, warheadParticles;
+let score, level, gameOver, gameStarted, waveActive, waveTimer, missilesThisWave, missilesLaunched;
 
-// ── Air Raid Siren (ambient, toggleable) ──
-let sirenEnabled = true;
-let sirenCtx = null;
+// ── Air Raid Siren ──
+let audioCtx = null;
 let sirenNode = null;
+let sirenEnabled = true;
+
+function getAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
 
 function startSiren() {
   if (!sirenEnabled || sirenNode) return;
   try {
-    if (!sirenCtx) sirenCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = sirenCtx.createOscillator();
-    const gain = sirenCtx.createGain();
-    const lfo = sirenCtx.createOscillator();
-    const lfoGain = sirenCtx.createGain();
-
-    // Slow rising/falling siren: LFO modulates frequency
+    const ctx = getAudio();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
     osc.type = 'sine';
     osc.frequency.value = 420;
     lfo.type = 'triangle';
-    lfo.frequency.value = 0.4; // one cycle per 2.5 seconds
-    lfoGain.gain.value = 180;  // sweep 240-600 Hz
-
+    lfo.frequency.value = 0.35;
+    lfoGain.gain.value = 180;
     lfo.connect(lfoGain);
     lfoGain.connect(osc.frequency);
     osc.connect(gain);
-    gain.gain.value = 0.025; // very quiet
-    gain.connect(sirenCtx.destination);
-
+    gain.gain.value = 0;
+    gain.connect(ctx.destination);
     osc.start();
     lfo.start();
     sirenNode = { osc, lfo, gain };
@@ -82,51 +118,50 @@ function stopSiren() {
 
 function updateSirenVolume() {
   if (!sirenNode || !sirenEnabled) return;
-  // Louder when missiles are close to cities
-  const h = H();
   let threat = 0;
+  const h = H();
   for (const m of missiles) {
     const closeness = m.y / (h - 35);
-    if (closeness > 0.5) threat = Math.max(threat, closeness);
+    if (closeness > 0.3) threat = Math.max(threat, closeness);
   }
-  // Volume scales with threat: 0.01 (distant) to 0.06 (close)
-  const vol = 0.01 + threat * 0.05;
-  try { sirenNode.gain.gain.setTargetAtTime(vol, sirenCtx.currentTime, 0.3); } catch(e) {}
+  const vol = missiles.length > 0 ? 0.01 + threat * 0.04 : 0;
+  try { sirenNode.gain.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.3); } catch(e) {}
+}
+
+function startGame(diffIdx) {
+  diff = DIFF[diffIdx];
+  document.getElementById('diff-screen').style.display = 'none';
+  // Ensure AudioContext is created on user gesture
+  getAudio();
+  init();
+  gameStarted = true;
 }
 
 function init() {
   const w = W(), h = H();
-
-  // 6 cities between 3 batteries
-  cities = [];
-  batteries = [];
   const groundY = h - 35;
-
-  // Battery positions: 15%, 50%, 85%
   batteries = [
     { x: w * 0.12, y: groundY, ammo: 10 },
     { x: w * 0.50, y: groundY, ammo: 10 },
     { x: w * 0.88, y: groundY, ammo: 10 },
   ];
-
-  // Cities between batteries
   const cityPositions = [0.22, 0.32, 0.40, 0.60, 0.70, 0.78];
   cities = cityPositions.map(p => ({
-    x: w * p, y: groundY, alive: true,
-    buildings: generateBuildings()
+    x: w * p, y: groundY, alive: true, buildings: generateBuildings()
   }));
-
   missiles = [];
   rockets = [];
   explosions = [];
   particles = [];
+  warheadParticles = [];
   score = 0;
   level = 1;
   gameOver = false;
   waveActive = true;
   waveTimer = 0;
-  missilesThisWave = 8 + level * 4;
+  missilesThisWave = diff.baseMsl + level * diff.mslLvl;
   missilesLaunched = 0;
+  stopSiren();
 }
 
 function generateBuildings() {
@@ -143,7 +178,6 @@ function generateBuildings() {
   return blds;
 }
 
-// Find nearest battery with ammo
 function nearestBattery(tx, ty) {
   let best = null, bestDist = Infinity;
   for (const b of batteries) {
@@ -154,27 +188,26 @@ function nearestBattery(tx, ty) {
   return best;
 }
 
-// Tap to launch
 function fire(tx, ty) {
-  if (gameOver) { init(); return; }
-
+  if (gameOver) {
+    document.getElementById('diff-screen').style.display = 'flex';
+    gameStarted = false;
+    stopSiren();
+    return;
+  }
+  if (!gameStarted) return;
   const bat = nearestBattery(tx, ty);
   if (!bat) return;
-
   bat.ammo--;
-
-  const dx = tx - bat.x;
-  const dy = ty - bat.y;
+  const dx = tx - bat.x, dy = ty - bat.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
   const speed = 7;
-
   rockets.push({
-    x: bat.x, y: bat.y,
-    targetX: tx, targetY: ty,
-    vx: dx / dist * speed,
-    vy: dy / dist * speed,
+    x: bat.x, y: bat.y, targetX: tx, targetY: ty,
+    vx: dx / dist * speed, vy: dy / dist * speed,
     trail: [{x: bat.x, y: bat.y, age: 0}]
   });
+  if (typeof SFX !== 'undefined') SFX.shoot();
 }
 
 canvas.addEventListener('click', e => fire(e.clientX, e.clientY));
@@ -186,35 +219,25 @@ canvas.addEventListener('touchstart', e => {
 function spawnMissile() {
   const targets = cities.filter(c => c.alive);
   if (targets.length === 0) return;
-  // Sometimes target batteries too
   const allTargets = [...targets, ...batteries.filter(b => b.ammo > 0)];
   const target = allTargets[Math.floor(Math.random() * allTargets.length)];
-
   const startX = Math.random() * W();
-  const dx = target.x - startX;
-  const dy = target.y - 0;
+  const dx = target.x - startX, dy = target.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
-  const speed = 0.6 + level * 0.15 + Math.random() * 0.3;
-
-  // Some missiles split (MIRV) at higher levels
+  const speed = diff.baseSpd + level * diff.spdLvl + Math.random() * 0.2;
   const mirv = level >= 3 && Math.random() < 0.2;
-
   missiles.push({
-    x: startX, y: -5,
-    startX: startX, startY: -5,
-    vx: dx / dist * speed,
-    vy: dy / dist * speed,
+    x: startX, y: -5, startX, startY: -5,
+    vx: dx / dist * speed, vy: dy / dist * speed,
     trail: [{x: startX, y: -5, age: 0}],
-    mirv: mirv,
-    mirvSplit: false,
-    splitY: H() * (0.3 + Math.random() * 0.3)
+    mirv, mirvSplit: false, splitY: H() * (0.3 + Math.random() * 0.3)
   });
 }
 
 function update() {
-  if (gameOver) return;
+  if (!gameStarted || gameOver) return;
 
-  // Spawn enemy missiles
+  // Spawn
   if (waveActive && missilesLaunched < missilesThisWave) {
     waveTimer++;
     const interval = Math.max(15, 60 - level * 5);
@@ -227,30 +250,39 @@ function update() {
   }
   updateSirenVolume();
 
-  // Update enemy missiles
+  // Enemy missiles
   for (let i = missiles.length - 1; i >= 0; i--) {
     const m = missiles[i];
     m.x += m.vx;
     m.y += m.vy;
     m.trail.push({x: m.x, y: m.y, age: 0});
 
-    // MIRV split
+    // Warhead particles (fire trail)
+    if (Math.random() < 0.6) {
+      warheadParticles.push({
+        x: m.x + (Math.random() - 0.5) * 4,
+        y: m.y + (Math.random() - 0.5) * 4,
+        vx: (Math.random() - 0.5) * 0.5 - m.vx * 0.1,
+        vy: (Math.random() - 0.5) * 0.5 - m.vy * 0.1,
+        life: 15 + Math.random() * 20,
+        maxLife: 35,
+        r: 1 + Math.random() * 2,
+      });
+    }
+
+    // MIRV
     if (m.mirv && !m.mirvSplit && m.y > m.splitY) {
       m.mirvSplit = true;
-      // Spawn 2 children
       for (let k = 0; k < 2; k++) {
         const targets = cities.filter(c => c.alive);
         if (targets.length === 0) break;
         const t = targets[Math.floor(Math.random() * targets.length)];
-        const dx = t.x - m.x;
-        const dy = t.y - m.y;
+        const dx = t.x - m.x, dy = t.y - m.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const spd = Math.sqrt(m.vx*m.vx + m.vy*m.vy) * 1.1;
         missiles.push({
-          x: m.x, y: m.y,
-          startX: m.x, startY: m.y,
-          vx: dx / dist * spd,
-          vy: dy / dist * spd,
+          x: m.x, y: m.y, startX: m.x, startY: m.y,
+          vx: dx / dist * spd, vy: dy / dist * spd,
           trail: [{x: m.x, y: m.y, age: 0}],
           mirv: false, mirvSplit: false, splitY: 0
         });
@@ -259,15 +291,14 @@ function update() {
 
     // Hit ground
     if (m.y >= H() - 35) {
-      // Destroy city?
       for (const city of cities) {
         if (city.alive && Math.abs(m.x - city.x) < 20) {
           city.alive = false;
           addExplosion(m.x, H() - 35, 50, '#FF4400');
           addParticles(m.x, H() - 35, 15, CITY_COLOR);
+          if (typeof SFX !== 'undefined') SFX.cityDestroyed();
         }
       }
-      // Destroy battery?
       for (const bat of batteries) {
         if (bat.ammo > 0 && Math.abs(m.x - bat.x) < 15) {
           bat.ammo = 0;
@@ -276,20 +307,19 @@ function update() {
       }
       addExplosion(m.x, H() - 35, 30, '#FF2200');
       missiles.splice(i, 1);
-
       if (!cities.some(c => c.alive)) { gameOver = true; stopSiren(); }
       continue;
     }
 
-    // Check explosion collision
+    // Explosion collision
     let destroyed = false;
     for (const exp of explosions) {
-      const dx = m.x - exp.x;
-      const dy = m.y - exp.y;
+      const dx = m.x - exp.x, dy = m.y - exp.y;
       if (dx * dx + dy * dy < exp.r * exp.r) {
         missiles.splice(i, 1);
         score += 25;
-        addParticles(m.x, m.y, 6, MISSILE_COLOR);
+        addParticles(m.x, m.y, 8, '#FF4444');
+        if (typeof SFX !== 'undefined') SFX.explosion();
         destroyed = true;
         break;
       }
@@ -297,15 +327,12 @@ function update() {
     if (destroyed) continue;
   }
 
-  // Update player rockets
+  // Player rockets
   for (let i = rockets.length - 1; i >= 0; i--) {
     const r = rockets[i];
-    r.x += r.vx;
-    r.y += r.vy;
+    r.x += r.vx; r.y += r.vy;
     r.trail.push({x: r.x, y: r.y, age: 0});
-
-    const dx = r.x - r.targetX;
-    const dy = r.y - r.targetY;
+    const dx = r.x - r.targetX, dy = r.y - r.targetY;
     if (dx * dx + dy * dy < 80) {
       addExplosion(r.targetX, r.targetY, 50, EXPLOSION_MID);
       rockets.splice(i, 1);
@@ -313,19 +340,15 @@ function update() {
     }
   }
 
-  // Update explosions — including friendly fire!
+  // Explosions + friendly fire
   for (let i = explosions.length - 1; i >= 0; i--) {
     const e = explosions[i];
     if (e.growing) {
       e.r += 1.8;
       if (e.r >= e.maxR) e.growing = false;
-
-      // Friendly fire: explosion damages cities and batteries too!
-      // ABM interceptors are nuclear — their blast is dangerous
       for (const city of cities) {
         if (city.alive) {
-          const dx = city.x - e.x;
-          const dy = city.y - e.y;
+          const dx = city.x - e.x, dy = city.y - e.y;
           if (dx * dx + dy * dy < e.r * e.r) {
             city.alive = false;
             addParticles(city.x, city.y, 10, '#FF8800');
@@ -334,11 +357,8 @@ function update() {
       }
       for (const bat of batteries) {
         if (bat.ammo > 0) {
-          const dx = bat.x - e.x;
-          const dy = bat.y - e.y;
-          if (dx * dx + dy * dy < (e.r * 0.7) * (e.r * 0.7)) {
-            bat.ammo = 0; // battery destroyed by own explosion
-          }
+          const dx = bat.x - e.x, dy = bat.y - e.y;
+          if (dx * dx + dy * dy < (e.r * 0.7) * (e.r * 0.7)) bat.ammo = 0;
         }
       }
     } else {
@@ -347,41 +367,34 @@ function update() {
     }
   }
 
-  // Age and fade trails
-  for (const m of missiles) {
-    for (const t of m.trail) t.age++;
-  }
-  for (const r of rockets) {
-    for (const t of r.trail) t.age++;
-  }
-  // Trim old trail points
-  for (const m of missiles) {
-    m.trail = m.trail.filter(t => t.age < 300);
-  }
-  for (const r of rockets) {
-    r.trail = r.trail.filter(t => t.age < 120);
-  }
+  // Trail aging
+  for (const m of missiles) { for (const t of m.trail) t.age++; }
+  for (const r of rockets) { for (const t of r.trail) t.age++; }
+  for (const m of missiles) { m.trail = m.trail.filter(t => t.age < 300); }
+  for (const r of rockets) { r.trail = r.trail.filter(t => t.age < 120); }
 
-  // Update particles
+  // Particles
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vy += 0.05; // gravity
-    p.life--;
+    p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.life--;
     if (p.life <= 0) particles.splice(i, 1);
   }
 
-  // Wave end check
+  // Warhead particles
+  for (let i = warheadParticles.length - 1; i >= 0; i--) {
+    const p = warheadParticles[i];
+    p.x += p.vx; p.y += p.vy; p.life--;
+    if (p.life <= 0) warheadParticles.splice(i, 1);
+  }
+
+  // Wave end
   if (missilesLaunched >= missilesThisWave && missiles.length === 0 && !gameOver) {
     stopSiren();
-    // Next wave
     level++;
-    missilesThisWave = 8 + level * 4;
+    missilesThisWave = diff.baseMsl + level * diff.mslLvl;
     missilesLaunched = 0;
-    // Refill ammo + bonus
     for (const b of batteries) b.ammo = 10;
-    score += cities.filter(c => c.alive).length * 50; // city bonus
+    score += cities.filter(c => c.alive).length * 50;
   }
 }
 
@@ -394,11 +407,8 @@ function addParticles(x, y, count, color) {
     const angle = Math.random() * Math.PI * 2;
     const speed = 1 + Math.random() * 3;
     particles.push({
-      x, y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed - 1,
-      life: 20 + Math.random() * 30,
-      color
+      x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 1,
+      life: 20 + Math.random() * 30, color
     });
   }
 }
@@ -406,7 +416,7 @@ function addParticles(x, y, count, color) {
 function draw() {
   const w = W(), h = H();
 
-  // Sky gradient
+  // Sky
   const skyGrad = ctx.createLinearGradient(0, 0, 0, h);
   skyGrad.addColorStop(0, SKY_TOP);
   skyGrad.addColorStop(1, SKY_BOTTOM);
@@ -418,37 +428,46 @@ function draw() {
   for (let i = 0; i < 80; i++) {
     const sx = (i * 173 + 37) % w;
     const sy = (i * 131 + 17) % (h - 80);
-    const brightness = 0.2 + Math.sin(Date.now() / 1000 + i) * 0.15;
-    ctx.globalAlpha = brightness;
+    ctx.globalAlpha = 0.2 + Math.sin(Date.now() / 1000 + i) * 0.15;
     ctx.fillRect(sx, sy, 1, 1);
   }
   ctx.globalAlpha = 1;
 
-  // Ground — terrain
+  // Ground
   ctx.fillStyle = GROUND_COLOR;
   ctx.beginPath();
   ctx.moveTo(0, h);
   ctx.lineTo(0, h - 30);
   for (let x = 0; x <= w; x += 20) {
-    const bump = Math.sin(x * 0.02) * 5 + Math.sin(x * 0.05) * 3;
-    ctx.lineTo(x, h - 30 + bump);
+    ctx.lineTo(x, h - 30 + Math.sin(x * 0.02) * 5 + Math.sin(x * 0.05) * 3);
   }
   ctx.lineTo(w, h);
   ctx.closePath();
   ctx.fill();
-
-  // Dark ground layer
   ctx.fillStyle = '#5a4510';
   ctx.fillRect(0, h - 15, w, 15);
 
-  // Enemy missile trails (fading!)
+  // Warhead particles (fire trail behind missiles)
+  for (const p of warheadParticles) {
+    const t = p.life / p.maxLife;
+    // Hot core → cooling embers
+    const r = Math.floor(255);
+    const g = Math.floor(100 + 155 * t);
+    const b = Math.floor(50 * t);
+    ctx.fillStyle = `rgba(${r},${g},${b},${t * 0.8})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r * t, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Enemy missile trails
   for (const m of missiles) {
     if (m.trail.length < 2) continue;
     for (let j = 1; j < m.trail.length; j++) {
       const t0 = m.trail[j-1], t1 = m.trail[j];
       const alpha = Math.max(0, 1 - t0.age / 300);
-      ctx.strokeStyle = `rgba(255,68,68,${alpha * 0.7})`;
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = `rgba(255,68,68,${alpha * 0.5})`;
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(t0.x, t0.y);
       ctx.lineTo(t1.x, t1.y);
@@ -457,14 +476,14 @@ function draw() {
     // Warhead glow
     ctx.fillStyle = '#FF4444';
     ctx.shadowColor = '#FF0000';
-    ctx.shadowBlur = 6;
+    ctx.shadowBlur = 8;
     ctx.beginPath();
-    ctx.arc(m.x, m.y, 2.5, 0, Math.PI * 2);
+    ctx.arc(m.x, m.y, 3, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
   }
 
-  // Player rocket trails (fading)
+  // Player rocket trails
   for (const r of rockets) {
     if (r.trail.length < 2) continue;
     for (let j = 1; j < r.trail.length; j++) {
@@ -477,18 +496,16 @@ function draw() {
       ctx.lineTo(t1.x, t1.y);
       ctx.stroke();
     }
-    // Rocket head
     ctx.fillStyle = '#88FF88';
     ctx.beginPath();
     ctx.arc(r.x, r.y, 2, 0, Math.PI * 2);
     ctx.fill();
-    // Crosshair at target
+    // Crosshair
     ctx.strokeStyle = 'rgba(68,255,68,0.4)';
     ctx.lineWidth = 1;
-    const s = 8;
     ctx.beginPath();
-    ctx.moveTo(r.targetX - s, r.targetY); ctx.lineTo(r.targetX + s, r.targetY);
-    ctx.moveTo(r.targetX, r.targetY - s); ctx.lineTo(r.targetX, r.targetY + s);
+    ctx.moveTo(r.targetX - 8, r.targetY); ctx.lineTo(r.targetX + 8, r.targetY);
+    ctx.moveTo(r.targetX, r.targetY - 8); ctx.lineTo(r.targetX, r.targetY + 8);
     ctx.stroke();
   }
 
@@ -497,7 +514,7 @@ function draw() {
     const grad = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r);
     grad.addColorStop(0, EXPLOSION_INNER);
     grad.addColorStop(0.3, e.color || EXPLOSION_MID);
-    grad.addColorStop(0.7, `rgba(255,50,0,0.3)`);
+    grad.addColorStop(0.7, 'rgba(255,50,0,0.3)');
     grad.addColorStop(1, 'rgba(255,20,0,0)');
     ctx.fillStyle = grad;
     ctx.beginPath();
@@ -505,11 +522,10 @@ function draw() {
     ctx.fill();
   }
 
-  // Particles
+  // Debris particles
   for (const p of particles) {
-    const alpha = p.life / 50;
     ctx.fillStyle = p.color;
-    ctx.globalAlpha = Math.min(1, alpha);
+    ctx.globalAlpha = Math.min(1, p.life / 50);
     ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
   }
   ctx.globalAlpha = 1;
@@ -517,24 +533,19 @@ function draw() {
   // Cities
   for (const city of cities) {
     if (!city.alive) {
-      // Rubble
       ctx.fillStyle = '#333';
       ctx.fillRect(city.x - 12, h - 38, 24, 4);
       continue;
     }
     for (const b of city.buildings) {
-      const bx = city.x + b.offsetX;
-      const by = h - 35 - b.h;
+      const bx = city.x + b.offsetX, by = h - 35 - b.h;
       ctx.fillStyle = CITY_DARK;
       ctx.fillRect(bx, by, b.w, b.h);
-      // Windows
       if (b.lit) {
         ctx.fillStyle = CITY_COLOR;
         for (let wy = by + 3; wy < by + b.h - 3; wy += 5) {
           for (let wx = bx + 1; wx < bx + b.w - 2; wx += 3) {
-            if (Math.random() > 0.3) {
-              ctx.fillRect(wx, wy, 2, 2);
-            }
+            if (Math.random() > 0.3) ctx.fillRect(wx, wy, 2, 2);
           }
         }
       }
@@ -543,7 +554,6 @@ function draw() {
 
   // Batteries
   for (const bat of batteries) {
-    // Base
     ctx.fillStyle = bat.ammo > 0 ? '#558855' : '#444';
     ctx.beginPath();
     ctx.moveTo(bat.x - 12, h - 30);
@@ -552,7 +562,6 @@ function draw() {
     ctx.lineTo(bat.x + 12, h - 30);
     ctx.closePath();
     ctx.fill();
-    // Ammo count
     if (bat.ammo > 0) {
       ctx.fillStyle = '#88FF88';
       ctx.font = '9px monospace';
@@ -567,9 +576,7 @@ function draw() {
   ctx.textAlign = 'left';
   ctx.fillText('SCORE ' + score, 10, 22);
   ctx.textAlign = 'right';
-  ctx.fillText('WAVE ' + level, w - 10, 22);
-
-  // Ammo total
+  ctx.fillText('WAVE ' + level + ' [' + diff.name + ']', w - 10, 22);
   const totalAmmo = batteries.reduce((s, b) => s + b.ammo, 0);
   ctx.textAlign = 'center';
   ctx.fillStyle = totalAmmo > 5 ? '#44FF44' : (totalAmmo > 0 ? '#FFAA00' : '#FF4444');
@@ -579,17 +586,14 @@ function draw() {
   if (gameOver) {
     ctx.fillStyle = 'rgba(0,0,0,0.75)';
     ctx.fillRect(0, 0, w, h);
-
     ctx.fillStyle = '#FF2222';
     ctx.font = 'bold 36px monospace';
     ctx.textAlign = 'center';
     ctx.fillText('THE END', w / 2, h / 2 - 40);
-
     ctx.fillStyle = '#00CCFF';
     ctx.font = '20px monospace';
     ctx.fillText('Score: ' + score, w / 2, h / 2);
     ctx.fillText('Wave: ' + level, w / 2, h / 2 + 28);
-
     ctx.fillStyle = '#666';
     ctx.font = '14px monospace';
     ctx.fillText('Tap to restart', w / 2, h / 2 + 65);
@@ -597,7 +601,8 @@ function draw() {
 }
 
 function loop() { update(); draw(); requestAnimationFrame(loop); }
-init();
+// Don't auto-init — wait for difficulty selection
+gameStarted = false;
 loop();
 </script>
 </body></html>
