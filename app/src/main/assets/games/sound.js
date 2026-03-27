@@ -85,6 +85,10 @@
     boom:       () => { noise(0.6, 0.2); beep(50, 0.5, 'sine', 0.1); },
     win:        () => { for(let i=0;i<5;i++) setTimeout(() => beep(440+i*110, 0.12, 'sine', 0.1), i*100); },
 
+    // Cheburashka-RKN (Exodus)
+    stomp:      () => beep(55, 0.15, 'sine', 0.12),
+    crunch:     () => { noise(0.15, 0.1); beep(80, 0.1, 'sawtooth', 0.08); },
+
     // General
     gameOver:   () => { beep(400, 0.2, 'sawtooth', 0.1); setTimeout(() => beep(300, 0.2, 'sawtooth', 0.1), 200); setTimeout(() => beep(200, 0.4, 'sawtooth', 0.1), 400); },
     menuSelect: () => beep(500, 0.04, 'square', 0.06),

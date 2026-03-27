@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Exodus</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #111; overflow: hidden; touch-action: none; }
+  body { display: flex; flex-direction: column; font-family: monospace; }
+  canvas { display: block; image-rendering: pixelated; flex: 1; }
+  #toolbar {
+    display: flex; height: 52px; background: #1a1a2e; border-top: 2px solid #333;
+    align-items: center; justify-content: center; gap: 6px; padding: 0 8px;
+  }
+  .tool-btn {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    width: 52px; height: 44px; background: #222; border: 2px solid #555; border-radius: 4px;
+    color: #ccc; font-size: 18px; cursor: pointer; user-select: none; position: relative;
+  }
+  .tool-btn.selected { border-color: #ff0; background: #333; color: #ff0; }
+  .tool-btn.disabled { opacity: 0.3; pointer-events: none; }
+  .tool-btn .count {
+    font-size: 9px; color: #0f0; position: absolute; bottom: 1px; right: 3px;
+  }
+  .tool-btn .label { font-size: 8px; margin-top: 1px; }
+  #hud {
+    display: flex; height: 28px; background: #1a1a2e; border-bottom: 2px solid #333;
+    align-items: center; justify-content: space-between; padding: 0 10px;
+    color: #aaa; font-size: 11px;
+  }
+  #hud .saved { color: #0f0; }
+  #hud .lost { color: #f44; }
+  #fire-bar { width: 80px; height: 8px; background: #333; border-radius: 3px; overflow: hidden; }
+  #fire-bar .fill { height: 100%; background: linear-gradient(90deg, #8B4513, #f00); width: 0%; }
+  #catch-msg { position: fixed; top: 40%; left: 50%; transform: translate(-50%,-50%); color: #f44; font-family: monospace; font-size: 16px; font-weight: bold; text-shadow: 0 0 8px #f00; pointer-events: none; z-index: 50; opacity: 0; transition: opacity 0.3s; white-space: nowrap; }
+  #overlay {
+    display: none; position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.85);
+    flex-direction: column; align-items: center; justify-content: center; color: #fff;
+    font-family: monospace; text-align: center;
+  }
+  #overlay.show { display: flex; }
+  #overlay h1 { font-size: 24px; margin-bottom: 12px; }
+  #overlay p { font-size: 14px; margin: 4px 0; color: #aaa; }
+  #overlay .stars { font-size: 28px; margin: 10px 0; }
+  #overlay button {
+    margin-top: 16px; padding: 10px 28px; font-size: 16px; font-family: monospace;
+    background: #2a6; color: #fff; border: none; border-radius: 6px; cursor: pointer;
+  }
+  #overlay button:hover { background: #3b7; }
+  #overlay button.retry { background: #a33; }
+  #overlay button.retry:hover { background: #c44; }
+</style>
+</head><body>
+<div id="hud">
+  <span id="hud-level">Level 1</span>
+  <span><span class="saved" id="hud-saved">Saved: 0</span> / <span id="hud-total">0</span> <span class="lost" id="hud-lost">(Lost: 0)</span></span>
+  <div id="fire-bar"><div class="fill" id="fire-fill"></div></div>
+</div>
+<canvas id="c"></canvas>
+<div id="toolbar"></div>
+<div id="catch-msg"></div>
+<div id="overlay">
+  <h1 id="ov-title"></h1>
+  <div class="stars" id="ov-stars"></div>
+  <p id="ov-text"></p>
+  <p id="ov-tutorial" style="color:#ff0;margin-top:8px"></p>
+  <button id="ov-btn" onclick="ovAction()">Start</button>
+  <button id="ov-btn2" class="retry" style="display:none" onclick="ovAction2()">Retry</button>
+</div>
+<script src="sound.js"></script>
+<script src="loader.js"></script>
+<script>
+"use strict";
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// ─── TILE / MAP CONSTANTS ───
+const T = 16; // tile size in pixels
+const MW = 80; // map width in tiles
+const MH = 20; // map height in tiles
+const GROUND_Y = 16; // ground row (0-indexed), row 17-19 = underground
+
+// tile types
+const EMPTY = 0, GROUND = 1, WALL = 2, PIT = 3, RIVER = 4, CLIFF_EDGE = 5, EXIT = 6, DOOR = 7, CITY = 8;
+
+// ─── TOOL TYPES ───
+const TOOL = { BRIDGE: 0, LADDER: 1, SIGN: 2, UMBRELLA: 3, BLOCKER: 4 };
+const TOOL_NAMES = ['BRIDGE', 'LADDER', 'SIGN', 'UMBRELLA', 'BLOCKER'];
+const TOOL_ICONS = ['\u2550', '\u256B', '\u25B6', '\u2602', '\u270B'];
+
+// ─── LEVELS ───
+const LEVELS = [
+  { // 1 — tutorial: one pit
+    people: 10, tools: [5,0,0,0,0], fireSpeed: 0.008,
+    tutorial: 'Place a bridge over the pit!',
+    generate(m) {
+      fillGround(m);
+      digPit(m, 30, 4);
+      placeExit(m, 70);
+      placeDoor(m, 5);
+      placeCity(m, 0, 5);
+    }
+  },
+  { // 2 — pit + wall
+    people: 15, tools: [3,2,0,0,0], fireSpeed: 0.010,
+    tutorial: 'Bridges span pits. Ladders climb walls.',
+    generate(m) {
+      fillGround(m);
+      digPit(m, 25, 4);
+      buildWall(m, 45, 3);
+      placeExit(m, 70);
+      placeDoor(m, 5);
+      placeCity(m, 0, 5);
+    }
+  },
+  { // 3 — two paths
+    people: 15, tools: [2,0,2,0,0], fireSpeed: 0.012,
+    tutorial: 'Signs redirect people. Split them wisely.',
+    generate(m) {
+      fillGround(m);
+      // upper path: raise platform from 35-55 at row GROUND_Y-4
+      for (let x = 30; x < 55; x++) { m[GROUND_Y-4][x] = GROUND; m[GROUND_Y-3][x] = GROUND; }
+      // ramp up at 28
+      for (let y = GROUND_Y-3; y < GROUND_Y; y++) m[y][29] = GROUND;
+      for (let y = GROUND_Y-2; y < GROUND_Y; y++) m[y][30] = GROUND;
+      // ramp down at 55
+      for (let y = GROUND_Y-3; y < GROUND_Y; y++) m[y][55] = GROUND;
+      for (let y = GROUND_Y-2; y < GROUND_Y; y++) m[y][54] = GROUND;
+      // lower path pit
+      digPit(m, 38, 5);
+      placeExit(m, 70);
+      placeDoor(m, 5);
+      placeCity(m, 0, 5);
+    }
+  },
+  { // 4 — cliff descent
+    people: 20, tools: [1,0,0,3,0], fireSpeed: 0.012,
+    tutorial: 'Umbrellas let people float safely down cliffs.',
+    generate(m) {
+      fillGround(m);
+      // cliff: ground goes from y=GROUND_Y to y=GROUND_Y at x=35, but drop from row 10
+      // raise left portion
+      for (let x = 5; x < 35; x++) for (let y = 10; y < GROUND_Y; y++) m[y][x] = GROUND;
+      // cliff edge
+      m[10][35] = CLIFF_EDGE;
+      // small pit at bottom
+      digPit(m, 50, 3);
+      placeExit(m, 70);
+      placeDoor(m, 6, 9);
+      placeCity(m, 0, 6);
+    }
+  },
+  { // 5 — river + wall + pit
+    people: 20, tools: [2,2,1,0,0], fireSpeed: 0.014,
+    generate(m) {
+      fillGround(m);
+      digRiver(m, 22, 4);
+      buildWall(m, 40, 3);
+      digPit(m, 55, 3);
+      placeExit(m, 70);
+      placeDoor(m, 5);
+      placeCity(m, 0, 5);
+    }
+  },
+  { // 6 — maze-like
+    people: 20, tools: [1,3,3,0,0], fireSpeed: 0.015,
+    generate(m) {
+      fillGround(m);
+      buildWall(m, 20, 4);
+      buildWall(m, 35, 3);
+      buildWall(m, 50, 4);
+      digPit(m, 60, 3);
+      placeExit(m, 72);
+      placeDoor(m, 5);
+      placeCity(m, 0, 5);
+    }
+  },
+  { // 7 — cliff, pit, wall, fast fire
+    people: 25, tools: [1,1,0,2,0], fireSpeed: 0.022,
+    generate(m) {
+      fillGround(m);
+      // raise left half
+      for (let x = 5; x < 30; x++) for (let y = 10; y < GROUND_Y; y++) m[y][x] = GROUND;
+      m[10][30] = CLIFF_EDGE;
+      digPit(m, 45, 4);
+      buildWall(m, 60, 3);
+      placeExit(m, 72);
+      placeDoor(m, 6, 9);
+      placeCity(m, 0, 6);
+    }
+  },
+  { // 8 — two cliffs + river
+    people: 25, tools: [2,2,0,2,0], fireSpeed: 0.018,
+    generate(m) {
+      fillGround(m);
+      // first cliff
+      for (let x = 5; x < 25; x++) for (let y = 8; y < GROUND_Y; y++) m[y][x] = GROUND;
+      m[8][25] = CLIFF_EDGE;
+      // second raised plateau
+      for (let x = 35; x < 50; x++) for (let y = 11; y < GROUND_Y; y++) m[y][x] = GROUND;
+      m[11][50] = CLIFF_EDGE;
+      // river at bottom between plateaus
+      digRiver(m, 28, 5);
+      placeExit(m, 70);
+      placeDoor(m, 6, 7);
+      placeCity(m, 0, 6);
+    }
+  },
+  { // 9 — trap level, obvious path is dead end
+    people: 25, tools: [1,0,5,0,1], fireSpeed: 0.018,
+    tutorial: 'The obvious path is a dead end. Use signs!',
+    generate(m) {
+      fillGround(m);
+      // dead-end right path: wall at 60 blocks
+      buildWall(m, 58, 5);
+      // real path: upper route from x=30, but need signs to go up ramp
+      for (let x = 25; x < 55; x++) for (let y = 10; y < GROUND_Y; y++) m[y][x] = GROUND;
+      // gap at top route at 53
+      m[10][53] = EMPTY; m[10][54] = EMPTY;
+      digPit(m, 53, 2); // actually just leave gap
+      // exit above the wall
+      for (let x = 62; x < 75; x++) m[GROUND_Y][x] = GROUND; // ensure ground
+      placeExit(m, 70);
+      placeDoor(m, 5);
+      placeCity(m, 0, 5);
+    }
+  },
+  { // 10 — everything, hard
+    people: 30, tools: [2,1,2,2,1], fireSpeed: 0.025,
+    tutorial: 'Final level. Good luck.',
+    generate(m) {
+      fillGround(m);
+      // raised start
+      for (let x = 5; x < 20; x++) for (let y = 10; y < GROUND_Y; y++) m[y][x] = GROUND;
+      m[10][20] = CLIFF_EDGE;
+      digRiver(m, 25, 3);
+      digPit(m, 35, 3);
+      buildWall(m, 48, 4);
+      // second cliff
+      for (let x = 55; x < 62; x++) for (let y = 11; y < GROUND_Y; y++) m[y][x] = GROUND;
+      m[11][62] = CLIFF_EDGE;
+      digPit(m, 66, 3);
+      placeExit(m, 74);
+      placeDoor(m, 6, 9);
+      placeCity(m, 0, 6);
+    }
+  },
+];
+
+// ─── LEVEL HELPERS ───
+function makeMap() {
+  const m = [];
+  for (let y = 0; y < MH; y++) { m[y] = []; for (let x = 0; x < MW; x++) m[y][x] = EMPTY; }
+  return m;
+}
+function fillGround(m) {
+  for (let x = 0; x < MW; x++) { m[GROUND_Y][x] = GROUND; for (let y = GROUND_Y+1; y < MH; y++) m[y][x] = GROUND; }
+}
+function digPit(m, sx, w) {
+  for (let x = sx; x < sx + w && x < MW; x++) { m[GROUND_Y][x] = PIT; m[GROUND_Y+1][x] = PIT; m[GROUND_Y+2][x] = PIT; }
+}
+function digRiver(m, sx, w) {
+  for (let x = sx; x < sx + w && x < MW; x++) m[GROUND_Y][x] = RIVER;
+}
+function buildWall(m, wx, h) {
+  for (let y = GROUND_Y - h; y < GROUND_Y; y++) { m[y][wx] = WALL; m[y][wx+1] = WALL; }
+}
+function placeExit(m, sx) {
+  for (let x = sx; x < sx + 5 && x < MW; x++) for (let y = GROUND_Y - 5; y < GROUND_Y; y++) m[y][x] = EXIT;
+}
+function placeDoor(m, dx, dy) {
+  const y = dy !== undefined ? dy : GROUND_Y - 1;
+  m[y][dx] = DOOR; m[y-1][dx] = DOOR;
+}
+function placeCity(m, sx, ex) {
+  for (let x = sx; x < ex; x++) for (let y = GROUND_Y - 6; y < GROUND_Y; y++) if (m[y][x] === EMPTY) m[y][x] = CITY;
+}
+
+// ─── GAME STATE ───
+let map, placedTools, people, particles;
+let currentLevel = 0, saved = 0, lost = 0, totalPeople = 0;
+let selectedTool = -1, toolCounts = [];
+let fireX = 0; // fire front in pixels
+let spawnTimer = 0, spawnCount = 0;
+let cameraX = 0, cameraDragStart = null, cameraDragCamStart = 0;
+let gameState = 'menu'; // menu, playing, levelComplete, gameOver, victory
+let canvasW, canvasH;
+let doorX = 5, doorY = GROUND_Y - 1;
+let animFrame = 0;
+let fireAmbientTimer = 0;
+
+// ─── CHEBURASHKA-RKN STATE ───
+let chebX = 0; // cheburashka position in pixels (left edge)
+let chebY = 0; // cheburashka Y (feet on ground)
+let chebWalkFrame = 0;
+let chebStompTimer = 0;
+let catchMsgTimer = 0;
+let catchMsgText = '';
+const CHEB_W = 40, CHEB_H = 50;
+const CATCH_MESSAGES = ['РКН censored another one', 'Blocked!', 'Access denied', 'Connection refused', 'Error 451', '403 Forbidden', 'Filtered!'];
+const CRUNCH_MESSAGES = ['*crunch*', 'Infrastructure destroyed', 'Removed for violations'];
+
+// ─── RESIZE ───
+function resize() {
+  canvasW = window.innerWidth;
+  canvasH = window.innerHeight - 82; // hud + toolbar
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── INITIALIZE LEVEL ───
+function initLevel(idx) {
+  const lv = LEVELS[idx];
+  map = makeMap();
+  lv.generate(map);
+  placedTools = [];
+  people = [];
+  particles = [];
+  saved = 0;
+  lost = 0;
+  totalPeople = lv.people;
+  toolCounts = [...lv.tools];
+  selectedTool = -1;
+  fireX = 0;
+  chebX = -CHEB_W; // start just off-screen left
+  chebY = 0; // will be set on first update
+  chebWalkFrame = 0;
+  chebStompTimer = 0;
+  catchMsgTimer = 0;
+  spawnTimer = 0;
+  spawnCount = 0;
+  cameraX = 0;
+  animFrame = 0;
+
+  // find door position
+  for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+    if (map[y][x] === DOOR) { doorX = x; doorY = y; break; }
+  }
+
+  updateToolbar();
+  updateHUD();
+}
+
+// ─── TOOLBAR ───
+function updateToolbar() {
+  const tb = document.getElementById('toolbar');
+  tb.innerHTML = '';
+  for (let i = 0; i < 5; i++) {
+    const btn = document.createElement('div');
+    btn.className = 'tool-btn' + (i === selectedTool ? ' selected' : '') + (toolCounts[i] <= 0 ? ' disabled' : '');
+    btn.innerHTML = `<span style="font-size:20px">${TOOL_ICONS[i]}</span><span class="count">${toolCounts[i]}</span>`;
+    btn.dataset.tool = i;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (toolCounts[i] <= 0) return;
+      selectedTool = selectedTool === i ? -1 : i;
+      updateToolbar();
+      SFX.click();
+    });
+    btn.addEventListener('touchstart', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (toolCounts[i] <= 0) return;
+      selectedTool = selectedTool === i ? -1 : i;
+      updateToolbar();
+      SFX.click();
+    });
+    tb.appendChild(btn);
+  }
+}
+
+function updateHUD() {
+  document.getElementById('hud-level').textContent = 'Level ' + (currentLevel + 1);
+  document.getElementById('hud-saved').textContent = 'Saved: ' + saved;
+  document.getElementById('hud-total').textContent = totalPeople;
+  document.getElementById('hud-lost').textContent = '(Lost: ' + lost + ')';
+  const pct = Math.min(100, (chebX / (MW * T)) * 100);
+  document.getElementById('fire-fill').style.width = pct + '%';
+}
+
+// ─── OVERLAY ───
+function showOverlay(title, text, btnText, stars, tutorial, showRetry) {
+  const ov = document.getElementById('overlay');
+  ov.classList.add('show');
+  document.getElementById('ov-title').textContent = title;
+  document.getElementById('ov-text').textContent = text;
+  document.getElementById('ov-btn').textContent = btnText;
+  document.getElementById('ov-stars').textContent = stars || '';
+  document.getElementById('ov-tutorial').textContent = tutorial || '';
+  const btn2 = document.getElementById('ov-btn2');
+  btn2.style.display = showRetry ? 'inline-block' : 'none';
+}
+function hideOverlay() { document.getElementById('overlay').classList.remove('show'); }
+
+window.ovAction = function() {
+  hideOverlay();
+  if (gameState === 'menu') {
+    gameState = 'playing';
+    initLevel(currentLevel);
+  } else if (gameState === 'levelComplete') {
+    currentLevel++;
+    if (currentLevel >= LEVELS.length) {
+      gameState = 'victory';
+      showOverlay('EXODUS COMPLETE', 'Total saved: ' + totalSaved + ' / ' + totalAll, 'Play Again', '', '');
+    } else {
+      showLevelIntro();
+    }
+  } else if (gameState === 'gameOver') {
+    initLevel(currentLevel);
+    gameState = 'playing';
+  } else if (gameState === 'victory') {
+    currentLevel = 0;
+    totalSaved = 0; totalAll = 0;
+    showLevelIntro();
+  }
+};
+window.ovAction2 = function() {
+  hideOverlay();
+  initLevel(currentLevel);
+  gameState = 'playing';
+};
+
+let totalSaved = 0, totalAll = 0;
+
+function showLevelIntro() {
+  gameState = 'menu';
+  const lv = LEVELS[currentLevel];
+  initLevel(currentLevel);
+  const toolStr = TOOL_NAMES.filter((_, i) => lv.tools[i] > 0).map((n, i) => {
+    const idx = TOOL_NAMES.indexOf(n);
+    return n + ': ' + lv.tools[idx === -1 ? i : idx];
+  }).join(', ');
+  // recalc tool string properly
+  let ts = [];
+  for (let i = 0; i < 5; i++) if (lv.tools[i] > 0) ts.push(TOOL_NAMES[i] + ': ' + lv.tools[i]);
+  const chebWarning = 'РКН is coming. Run.';
+  showOverlay('Level ' + (currentLevel + 1), lv.people + ' people. Tools: ' + ts.join(', '), 'Start', '', lv.tutorial || chebWarning);
+}
+
+// ─── PEOPLE ───
+const PERSON_W = 3, PERSON_H = 5;
+const BRIGHT_COLORS = ['#f44','#4f4','#44f','#ff4','#f4f','#4ff','#fa0','#f08','#0f8','#80f','#ff8','#8ff'];
+
+function spawnPerson() {
+  const px = doorX * T + 4;
+  const py = doorY * T - PERSON_H + T;
+  // find ground below door
+  let groundPy = py;
+  for (let ty = Math.floor(py / T); ty < MH; ty++) {
+    const tile = map[ty] ? map[ty][doorX] : GROUND;
+    if (tile === GROUND || tile === WALL || tile === CITY) { groundPy = ty * T - PERSON_H; break; }
+  }
+  people.push({
+    x: px, y: groundPy, vx: 1.5, vy: 0,
+    color: BRIGHT_COLORS[Math.floor(Math.random() * BRIGHT_COLORS.length)],
+    alive: true, saved: false, blocker: false, floating: false, walkFrame: 0, fallDist: 0
+  });
+}
+
+// ─── PLACED TOOL OBJECTS ───
+// { type, x, y, dir (for sign, 1=right, -1=left), personRef (for blocker) }
+
+// ─── COLLISION HELPERS ───
+function tileAt(px, py) {
+  const tx = Math.floor(px / T), ty = Math.floor(py / T);
+  if (tx < 0 || tx >= MW || ty < 0 || ty >= MH) return EMPTY;
+  return map[ty][tx];
+}
+
+function isSolid(tx, ty) {
+  if (tx < 0 || tx >= MW || ty < 0 || ty >= MH) return false;
+  const t = map[ty][tx];
+  if (t === GROUND || t === WALL || t === CITY) return true;
+  // check placed bridges/ladders
+  for (const pt of placedTools) {
+    if (pt.type === TOOL.BRIDGE) {
+      if (ty === pt.ty && tx >= pt.tx && tx < pt.tx + 4) return true;
+    }
+  }
+  return false;
+}
+
+function isLadderAt(tx, ty) {
+  for (const pt of placedTools) {
+    if (pt.type === TOOL.LADDER) {
+      if (tx >= pt.tx && tx <= pt.tx + 1 && ty >= pt.ty - 2 && ty <= pt.ty) return true;
+    }
+  }
+  return false;
+}
+
+function isUmbrellaAt(px, py) {
+  for (const pt of placedTools) {
+    if (pt.type === TOOL.UMBRELLA) {
+      const ux = pt.tx * T, uy = pt.ty * T;
+      if (Math.abs(px - ux) < T * 2 && py >= uy - T && py <= uy + T * 2) return true;
+    }
+  }
+  return false;
+}
+
+// ─── PARTICLE SYSTEM ───
+function addParticles(x, y, color, count, spread) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y, vx: (Math.random() - 0.5) * spread, vy: -Math.random() * spread * 0.7,
+      life: 30 + Math.random() * 30, color, size: 1 + Math.random() * 2
+    });
+  }
+}
+
+// ─── UPDATE ───
+function update() {
+  if (gameState !== 'playing') return;
+
+  const lv = LEVELS[currentLevel];
+  animFrame++;
+
+  // spawn people
+  spawnTimer++;
+  if (spawnTimer >= 90 && spawnCount < lv.people) { // ~1.5s at 60fps
+    spawnPerson();
+    spawnCount++;
+    spawnTimer = 0;
+  }
+
+  // ── Cheburashka-RKN advance ──
+  const chebSpeed = lv.fireSpeed * T * 0.85; // slightly slower than old fire
+  chebX += chebSpeed;
+  fireX = chebX - 20; // fire trail follows behind cheburashka
+  if (fireX < 0) fireX = 0;
+  chebWalkFrame += 0.08;
+
+  // find ground for cheburashka
+  const chebTX = Math.floor((chebX + CHEB_W / 2) / T);
+  chebY = GROUND_Y * T - CHEB_H; // default feet on ground row
+  // adjust if on raised terrain
+  for (let checkY = 0; checkY < MH; checkY++) {
+    if (chebTX >= 0 && chebTX < MW && map[checkY] && (map[checkY][chebTX] === GROUND || map[checkY][chebTX] === WALL || map[checkY][chebTX] === CITY)) {
+      chebY = checkY * T - CHEB_H;
+      break;
+    }
+  }
+
+  // stomping sound
+  chebStompTimer++;
+  if (chebStompTimer >= 30) { // ~0.5s at 60fps
+    chebStompTimer = 0;
+    SFX.stomp();
+  }
+
+  // cheburashka destroys tools it walks over
+  for (let i = placedTools.length - 1; i >= 0; i--) {
+    const pt = placedTools[i];
+    const toolPX = pt.tx * T;
+    if (toolPX < chebX + CHEB_W && toolPX + T > chebX - 10) {
+      addParticles(toolPX, pt.ty * T, '#a73', 6, 3);
+      SFX.crunch();
+      placedTools.splice(i, 1);
+    }
+  }
+
+  // cheburashka catches people
+  // catch message display timer
+  if (catchMsgTimer > 0) {
+    catchMsgTimer--;
+    const el = document.getElementById('catch-msg');
+    if (el) el.style.opacity = catchMsgTimer > 0 ? '1' : '0';
+  }
+
+  // check if cheburashka reached exit zone = level fails
+  const chebRightTX = Math.floor((chebX + CHEB_W) / T);
+  if (chebRightTX >= 0 && chebRightTX < MW && map[GROUND_Y - 1] && map[GROUND_Y - 1][chebRightTX] === EXIT) {
+    // everyone remaining is lost
+    for (const p of people) {
+      if (p.alive && !p.saved) { p.alive = false; lost++; }
+    }
+    // also count unspawned
+    lost += Math.max(0, totalPeople - spawnCount);
+    spawnCount = totalPeople;
+    gameState = 'gameOver';
+    SFX.gameOver();
+    showOverlay('РКН wins. Freedom lost.', 'Only saved ' + saved + ' of ' + totalPeople, 'Retry', '', '');
+    updateHUD();
+    return;
+  }
+
+  // update people
+  for (const p of people) {
+    if (!p.alive || p.saved) continue;
+
+    // caught by cheburashka
+    if (p.x < chebX + CHEB_W && p.x > chebX - 5) {
+      p.alive = false;
+      lost++;
+      addParticles(p.x, p.y, '#f00', 12, 4);
+      SFX.crunch();
+      catchMsgText = CATCH_MESSAGES[Math.floor(Math.random() * CATCH_MESSAGES.length)];
+      catchMsgTimer = 90;
+      const el = document.getElementById('catch-msg');
+      if (el) { el.textContent = catchMsgText; el.style.opacity = '1'; }
+      continue;
+    }
+    // caught by fire trail
+    if (p.x < fireX) {
+      p.alive = false;
+      lost++;
+      addParticles(p.x, p.y, '#f80', 8, 3);
+      SFX.die();
+      continue;
+    }
+
+    if (p.blocker) {
+      p.walkFrame = 0;
+      continue;
+    }
+
+    // gravity & falling
+    const feetTX = Math.floor((p.x + 1) / T);
+    const feetTY = Math.floor((p.y + PERSON_H) / T);
+    const onGround = isSolid(feetTX, feetTY);
+    const onLadder = isLadderAt(feetTX, Math.floor(p.y / T)) || isLadderAt(feetTX, feetTY);
+
+    if (!onGround && !onLadder) {
+      // check umbrella
+      if (isUmbrellaAt(p.x, p.y)) {
+        p.floating = true;
+      }
+      if (p.floating) {
+        p.vy = 1; // slow float
+      } else {
+        p.vy += 0.3; // gravity
+        if (p.vy > 6) p.vy = 6;
+      }
+      p.y += p.vy;
+      p.fallDist += Math.abs(p.vy);
+
+      // check if landed
+      const newFeetTY = Math.floor((p.y + PERSON_H) / T);
+      if (isSolid(feetTX, newFeetTY)) {
+        p.y = newFeetTY * T - PERSON_H;
+        if (p.fallDist > T * 3 && !p.floating) {
+          // splat!
+          p.alive = false;
+          lost++;
+          addParticles(p.x, p.y + PERSON_H, '#f00', 10, 4);
+          SFX.die();
+          continue;
+        }
+        p.vy = 0;
+        p.fallDist = 0;
+        p.floating = false;
+      }
+
+      // fell into pit/river
+      const tilBelow = tileAt(p.x + 1, p.y + PERSON_H + 2);
+      if (p.y > MH * T || tilBelow === PIT || tilBelow === RIVER) {
+        if (p.y > (MH - 1) * T) {
+          p.alive = false;
+          lost++;
+          addParticles(p.x, p.y, tilBelow === RIVER ? '#48f' : '#888', 8, 3);
+          SFX.die();
+          continue;
+        }
+      }
+    } else {
+      p.vy = 0;
+      p.fallDist = 0;
+      p.floating = false;
+
+      // climbing ladder
+      if (onLadder && !onGround) {
+        // climb up
+        p.y -= 1;
+      } else if (onLadder) {
+        // check if wall ahead
+        const aheadTX = Math.floor((p.x + (p.vx > 0 ? PERSON_W + 2 : -2)) / T);
+        const aheadTY = Math.floor(p.y / T);
+        if (isSolid(aheadTX, aheadTY) && !isLadderAt(aheadTX, aheadTY)) {
+          // climb
+          if (isLadderAt(feetTX, aheadTY - 1) || isLadderAt(feetTX, aheadTY)) {
+            p.y -= 1.5;
+          }
+        }
+      }
+
+      // walk
+      const nextX = p.x + p.vx;
+      const nextTX = Math.floor((nextX + (p.vx > 0 ? PERSON_W : 0)) / T);
+      const headTY = Math.floor(p.y / T);
+
+      // wall collision
+      if (isSolid(nextTX, headTY) && !isLadderAt(nextTX, headTY)) {
+        p.vx = -p.vx; // bounce
+      } else {
+        p.x = nextX;
+      }
+
+      p.walkFrame += 0.15;
+    }
+
+    // check signs
+    for (const pt of placedTools) {
+      if (pt.type === TOOL.SIGN) {
+        const sx = pt.tx * T, sy = pt.ty * T;
+        if (Math.abs(p.x - sx) < T && Math.abs(p.y - (sy - PERSON_H)) < T) {
+          p.vx = pt.dir > 0 ? Math.abs(p.vx) : -Math.abs(p.vx);
+        }
+      }
+      // blocker collision
+      if (pt.type === TOOL.BLOCKER && pt.personRef && pt.personRef.alive && pt.personRef.blocker) {
+        const bx = pt.personRef.x;
+        if (Math.abs(p.x - bx) < PERSON_W + 2 && p !== pt.personRef && Math.abs(p.y - pt.personRef.y) < PERSON_H) {
+          p.vx = -p.vx;
+        }
+      }
+    }
+
+    // check exit
+    const tx = Math.floor(p.x / T);
+    const ty = Math.floor(p.y / T);
+    if (tx >= 0 && tx < MW && ty >= 0 && ty < MH && map[ty][tx] === EXIT) {
+      p.saved = true;
+      saved++;
+      addParticles(p.x, p.y, '#0f0', 12, 4);
+      SFX.eat();
+    }
+
+    // bounds
+    if (p.x < 0) { p.x = 0; p.vx = Math.abs(p.vx); }
+    if (p.x > MW * T) { p.alive = false; lost++; }
+  }
+
+  // update particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const pt = particles[i];
+    pt.x += pt.vx; pt.y += pt.vy; pt.vy += 0.1; pt.life--;
+    if (pt.life <= 0) particles.splice(i, 1);
+  }
+
+  // camera: follow midpoint of alive people, or bias toward rightmost
+  let minPX = Infinity, maxPX = -Infinity, alivePeople = 0;
+  for (const p of people) {
+    if (p.alive && !p.saved) {
+      if (p.x < minPX) minPX = p.x;
+      if (p.x > maxPX) maxPX = p.x;
+      alivePeople++;
+    }
+  }
+  if (alivePeople > 0) {
+    const target = (minPX + maxPX) / 2 - canvasW / 2;
+    const clamped = Math.max(0, Math.min(MW * T - canvasW, target));
+    cameraX += (clamped - cameraX) * 0.05;
+  }
+
+  updateHUD();
+
+  // level end check
+  const allDone = people.length >= totalPeople && people.every(p => p.saved || !p.alive);
+  const allSpawned = spawnCount >= totalPeople;
+  if (allDone && allSpawned) {
+    const pct = saved / totalPeople;
+    totalSaved += saved;
+    totalAll += totalPeople;
+    if (pct < 0.3) {
+      gameState = 'gameOver';
+      SFX.gameOver();
+      showOverlay('РКН wins. Freedom lost.', 'Only saved ' + saved + ' of ' + totalPeople + '. Need at least 30%.', 'Retry', '', '');
+    } else {
+      gameState = 'levelComplete';
+      SFX.levelUp();
+      const stars = pct >= 1 ? '\u2605\u2605\u2605' : pct >= 0.8 ? '\u2605\u2605\u2606' : '\u2605\u2606\u2606';
+      const next = currentLevel < LEVELS.length - 1 ? 'Next Level' : 'Finish';
+      const msg = pct >= 1 ? 'Everyone escaped! РКН is sad.' : 'Saved ' + saved + ' of ' + totalPeople;
+      showOverlay('Level Complete!', msg, next, stars, '', pct < 0.8);
+    }
+  }
+}
+
+// ─── DRAW ───
+function drawTile(x, y, tx, ty) {
+  const t = map[ty][tx];
+  switch (t) {
+    case GROUND:
+      ctx.fillStyle = ty === GROUND_Y ? '#4a3' : '#532';
+      ctx.fillRect(x, y, T, T);
+      // texture
+      if (ty === GROUND_Y) {
+        ctx.fillStyle = '#5b4';
+        for (let i = 0; i < 3; i++) ctx.fillRect(x + (tx * 3 + i * 5) % 14, y + 2, 2, 1);
+      } else {
+        ctx.fillStyle = '#643';
+        ctx.fillRect(x + (tx * 7) % 12, y + (ty * 5) % 12, 4, 2);
+      }
+      break;
+    case WALL:
+      ctx.fillStyle = '#888';
+      ctx.fillRect(x, y, T, T);
+      ctx.fillStyle = '#777';
+      // brick pattern
+      const off = (ty % 2) * 8;
+      ctx.fillRect(x + off, y, 1, T);
+      ctx.fillRect(x + off + 8, y, 1, T);
+      ctx.fillRect(x, y + 7, T, 1);
+      break;
+    case PIT:
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(x, y, T, T);
+      break;
+    case RIVER:
+      ctx.fillStyle = '#1144aa';
+      ctx.fillRect(x, y, T, T);
+      // animated waves
+      ctx.fillStyle = '#3366cc';
+      const waveOff = (animFrame * 0.05 + tx) % 4;
+      ctx.fillRect(x + waveOff * 4, y + 4, 6, 2);
+      ctx.fillRect(x + ((waveOff + 2) % 4) * 4, y + 10, 5, 2);
+      break;
+    case EXIT:
+      ctx.fillStyle = '#0a3' + (Math.floor(animFrame / 10) % 2 === 0 ? 'a' : 'c');
+      ctx.fillRect(x, y, T, T);
+      // glow
+      ctx.fillStyle = 'rgba(0,255,100,0.15)';
+      ctx.fillRect(x - 2, y - 2, T + 4, T + 4);
+      break;
+    case DOOR:
+      ctx.fillStyle = '#654';
+      ctx.fillRect(x, y, T, T);
+      ctx.fillStyle = '#432';
+      ctx.fillRect(x + 3, y + 2, T - 6, T - 2);
+      ctx.fillStyle = '#ff0';
+      ctx.fillRect(x + T - 5, y + 7, 2, 2); // knob
+      break;
+    case CITY:
+      ctx.fillStyle = '#333';
+      ctx.fillRect(x, y, T, T);
+      // windows
+      if ((tx + ty) % 3 === 0) {
+        ctx.fillStyle = (animFrame + tx * 7) % 60 < 40 ? '#ff8' : '#aa5';
+        ctx.fillRect(x + 4, y + 3, 3, 3);
+        ctx.fillRect(x + 10, y + 9, 3, 3);
+      }
+      break;
+    default: // EMPTY
+      break;
+  }
+}
+
+function drawFireTrail(scrollX) {
+  // fire trail behind cheburashka
+  const trailEndPX = fireX - scrollX;
+  if (trailEndPX <= 0) return;
+
+  // dimmer base fire glow (it's just the trail)
+  ctx.fillStyle = 'rgba(140,30,0,0.35)';
+  ctx.fillRect(0, 0, trailEndPX, canvasH);
+
+  // fewer, smaller fire particles
+  for (let i = 0; i < 20; i++) {
+    const fx = trailEndPX - Math.random() * Math.min(trailEndPX, 80);
+    const fy = Math.random() * canvasH;
+    const colors = ['#f80','#f40','#ff0','#f00','#fa0'];
+    ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+    const sz = 1 + Math.random() * 3;
+    ctx.fillRect(fx, fy - ((animFrame + i * 13) % 16) * 2, sz, sz);
+  }
+
+  // small fire wisps near cheburashka
+  const chebScreenX = chebX - scrollX;
+  for (let i = 0; i < 8; i++) {
+    const fx = chebScreenX - 10 - Math.random() * 30;
+    const fy = chebY + Math.random() * CHEB_H;
+    const colors = ['#f80','#f40','#ff0'];
+    ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+    ctx.globalAlpha = 0.4 + Math.random() * 0.4;
+    const sz = 2 + Math.random() * 4;
+    ctx.fillRect(fx, fy - ((animFrame + i * 7) % 12) * 2, sz, sz);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawCheburashka(scrollX) {
+  const sx = Math.round(chebX - scrollX);
+  const sy = Math.round(chebY);
+  if (sx > canvasW + CHEB_W || sx < -CHEB_W * 2) return;
+
+  const frame = Math.floor(chebWalkFrame) % 2;
+
+  // ── Shadow ──
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(sx + CHEB_W / 2, sy + CHEB_H + 2, CHEB_W / 2.5, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ── Legs (walking animation) ──
+  ctx.fillStyle = '#6B3410';
+  if (frame === 0) {
+    // left leg forward, right back
+    ctx.fillRect(sx + 10, sy + 40, 7, 10);
+    ctx.fillRect(sx + 23, sy + 42, 7, 8);
+  } else {
+    // right leg forward, left back
+    ctx.fillRect(sx + 10, sy + 42, 7, 8);
+    ctx.fillRect(sx + 23, sy + 40, 7, 10);
+  }
+  // feet
+  ctx.fillStyle = '#4A2508';
+  if (frame === 0) {
+    ctx.fillRect(sx + 8, sy + 48, 10, 3);
+    ctx.fillRect(sx + 22, sy + 48, 10, 3);
+  } else {
+    ctx.fillRect(sx + 8, sy + 48, 10, 3);
+    ctx.fillRect(sx + 22, sy + 48, 10, 3);
+  }
+
+  // ── Body (torso) ──
+  ctx.fillStyle = '#8B4513';
+  ctx.fillRect(sx + 8, sy + 20, 24, 22);
+  // rounder body edges
+  ctx.fillRect(sx + 6, sy + 22, 28, 18);
+
+  // ── Arms ──
+  ctx.fillStyle = '#7A3B10';
+  // left arm reaching forward menacingly
+  const armWave = Math.sin(animFrame * 0.15) * 2;
+  ctx.fillRect(sx + 30, sy + 22 + armWave, 8, 5);
+  ctx.fillRect(sx + 35, sy + 20 + armWave, 5, 5);
+  // right arm
+  ctx.fillRect(sx + 2, sy + 24 - armWave, 8, 5);
+
+  // claws on reaching hand
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(sx + 38, sy + 20 + armWave, 2, 3);
+  ctx.fillRect(sx + 37, sy + 22 + armWave, 2, 3);
+  ctx.fillRect(sx + 39, sy + 22 + armWave, 2, 3);
+
+  // ── Head (big round) ──
+  ctx.fillStyle = '#8B4513';
+  // main head circle approximation
+  ctx.beginPath();
+  ctx.arc(sx + 20, sy + 14, 14, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ── Ears (iconic big round ears) ──
+  ctx.fillStyle = '#6B3410';
+  // left ear
+  ctx.beginPath();
+  ctx.arc(sx + 2, sy + 10, 10, 0, Math.PI * 2);
+  ctx.fill();
+  // right ear
+  ctx.beginPath();
+  ctx.arc(sx + 38, sy + 10, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // inner ears (darker)
+  ctx.fillStyle = '#4A2508';
+  ctx.beginPath();
+  ctx.arc(sx + 2, sy + 10, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(sx + 38, sy + 10, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ── Face ──
+  // angry red eyes
+  ctx.fillStyle = '#FF0000';
+  ctx.fillRect(sx + 13, sy + 10, 5, 4);
+  ctx.fillRect(sx + 22, sy + 10, 5, 4);
+  // glowing effect
+  ctx.fillStyle = 'rgba(255,0,0,0.3)';
+  ctx.fillRect(sx + 11, sy + 8, 9, 8);
+  ctx.fillRect(sx + 20, sy + 8, 9, 8);
+  // black pupils (looking right, toward people)
+  ctx.fillStyle = '#000';
+  ctx.fillRect(sx + 16, sy + 11, 2, 2);
+  ctx.fillRect(sx + 25, sy + 11, 2, 2);
+
+  // angry eyebrows
+  ctx.fillStyle = '#000';
+  ctx.fillRect(sx + 13, sy + 8, 5, 2);
+  ctx.fillRect(sx + 22, sy + 8, 5, 2);
+  // angled brows (inner higher)
+  ctx.fillRect(sx + 16, sy + 7, 2, 2);
+  ctx.fillRect(sx + 22, sy + 7, 2, 2);
+
+  // mouth with fangs
+  ctx.fillStyle = '#300';
+  ctx.fillRect(sx + 14, sy + 18, 12, 4);
+  // fangs
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(sx + 15, sy + 18, 2, 5);
+  ctx.fillRect(sx + 19, sy + 18, 2, 5);
+  ctx.fillRect(sx + 23, sy + 18, 2, 5);
+
+  // ── "РКН" on belly ──
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 8px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('РКН', sx + 20, sy + 35);
+  ctx.textAlign = 'left';
+
+  // ── Evil aura / glow around cheburashka ──
+  ctx.strokeStyle = 'rgba(255,0,0,0.2)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(sx + 20, sy + 25, 30 + Math.sin(animFrame * 0.1) * 3, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawPerson(p) {
+  if (!p.alive || p.saved) return;
+  const sx = Math.round(p.x - cameraX);
+  const sy = Math.round(p.y);
+  if (sx < -10 || sx > canvasW + 10) return;
+
+  ctx.fillStyle = p.color;
+  // head
+  ctx.fillRect(sx, sy, 3, 2);
+  // body
+  ctx.fillRect(sx, sy + 2, 3, 1);
+  // legs (animated)
+  if (p.blocker) {
+    ctx.fillStyle = '#f00';
+    ctx.fillRect(sx, sy + 3, 1, 2);
+    ctx.fillRect(sx + 2, sy + 3, 1, 2);
+    // arms out
+    ctx.fillRect(sx - 1, sy + 2, 1, 1);
+    ctx.fillRect(sx + 3, sy + 2, 1, 1);
+  } else if (p.floating) {
+    // spread legs
+    ctx.fillRect(sx, sy + 3, 1, 2);
+    ctx.fillRect(sx + 2, sy + 3, 1, 2);
+    // umbrella above
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(sx - 2, sy - 4, 7, 1);
+    ctx.fillRect(sx - 1, sy - 3, 5, 1);
+    ctx.fillRect(sx + 1, sy - 3, 1, 3);
+  } else {
+    const frame = Math.floor(p.walkFrame) % 2;
+    if (frame === 0) {
+      ctx.fillRect(sx, sy + 3, 1, 2);
+      ctx.fillRect(sx + 2, sy + 3, 1, 2);
+    } else {
+      ctx.fillRect(sx + 1, sy + 3, 1, 2);
+      ctx.fillRect(sx + 1, sy + 3, 1, 2);
+    }
+    // direction indicator (eyes)
+    ctx.fillStyle = '#000';
+    if (p.vx > 0) ctx.fillRect(sx + 2, sy, 1, 1);
+    else ctx.fillRect(sx, sy, 1, 1);
+  }
+}
+
+function drawPlacedTools() {
+  for (const pt of placedTools) {
+    const sx = pt.tx * T - cameraX;
+    const sy = pt.ty * T;
+    switch (pt.type) {
+      case TOOL.BRIDGE:
+        ctx.fillStyle = '#a73';
+        for (let i = 0; i < 4; i++) {
+          ctx.fillRect(sx + i * T, sy, T, 3);
+          ctx.fillRect(sx + i * T, sy + T - 3, T, 3);
+          // planks
+          ctx.fillStyle = '#c94';
+          ctx.fillRect(sx + i * T + 2, sy + 3, T - 4, T - 6);
+          ctx.fillStyle = '#a73';
+        }
+        break;
+      case TOOL.LADDER:
+        ctx.fillStyle = '#999';
+        // two rails
+        ctx.fillRect(sx, sy - T * 2, 2, T * 3);
+        ctx.fillRect(sx + T - 2, sy - T * 2, 2, T * 3);
+        // rungs
+        for (let r = 0; r < 6; r++) {
+          ctx.fillRect(sx + 2, sy - T * 2 + r * 8 + 2, T - 4, 2);
+        }
+        break;
+      case TOOL.SIGN:
+        ctx.fillStyle = '#cc0';
+        ctx.fillRect(sx + 4, sy - 6, 8, 6);
+        ctx.fillStyle = '#880';
+        ctx.fillRect(sx + 7, sy, 2, T);
+        // arrow
+        ctx.fillStyle = '#000';
+        if (pt.dir > 0) {
+          ctx.fillRect(sx + 6, sy - 4, 4, 2);
+          ctx.fillRect(sx + 9, sy - 5, 1, 4);
+        } else {
+          ctx.fillRect(sx + 6, sy - 4, 4, 2);
+          ctx.fillRect(sx + 6, sy - 5, 1, 4);
+        }
+        break;
+      case TOOL.UMBRELLA:
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(sx + 2, sy - 2, T - 4, 2);
+        ctx.fillRect(sx, sy, T, 1);
+        ctx.fillStyle = '#ccc';
+        ctx.fillRect(sx + 7, sy + 1, 2, T - 2);
+        break;
+    }
+  }
+}
+
+function draw() {
+  // clear
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  if (gameState !== 'playing' && gameState !== 'levelComplete' && gameState !== 'gameOver') return;
+
+  const scrollX = Math.round(cameraX);
+
+  // draw tiles
+  const startTX = Math.max(0, Math.floor(scrollX / T));
+  const endTX = Math.min(MW, Math.ceil((scrollX + canvasW) / T) + 1);
+  for (let ty = 0; ty < MH; ty++) {
+    for (let tx = startTX; tx < endTX; tx++) {
+      const sx = tx * T - scrollX;
+      const sy = ty * T;
+      drawTile(sx, sy, tx, ty);
+    }
+  }
+
+  // draw placed tools
+  drawPlacedTools();
+
+  // draw people
+  for (const p of people) drawPerson(p);
+
+  // draw particles
+  for (const pt of particles) {
+    ctx.fillStyle = pt.color;
+    ctx.globalAlpha = pt.life / 60;
+    ctx.fillRect(pt.x - scrollX, pt.y, pt.size, pt.size);
+  }
+  ctx.globalAlpha = 1;
+
+  // draw fire trail (behind cheburashka)
+  drawFireTrail(scrollX);
+
+  // draw cheburashka-RKN
+  drawCheburashka(scrollX);
+
+  // sky gradient (subtle)
+  const grd = ctx.createLinearGradient(0, 0, 0, 60);
+  grd.addColorStop(0, 'rgba(10,0,30,0.4)');
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, canvasW, 60);
+}
+
+// ─── INPUT ───
+function getEventPos(e) {
+  if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY - 30 };
+  return { x: e.clientX, y: e.clientY - 30 };
+}
+
+function handleTap(ex, ey) {
+  if (gameState !== 'playing') return;
+  const worldX = ex + cameraX;
+  const worldY = ey;
+  const tx = Math.floor(worldX / T);
+  const ty = Math.floor(worldY / T);
+
+  // tap on a placed sign to flip
+  for (const pt of placedTools) {
+    if (pt.type === TOOL.SIGN && pt.tx === tx && (pt.ty === ty || pt.ty === ty + 1)) {
+      pt.dir = -pt.dir;
+      SFX.click();
+      return;
+    }
+    // tap blocker to release
+    if (pt.type === TOOL.BLOCKER && pt.personRef && pt.personRef.blocker) {
+      const bx = pt.personRef.x - cameraX;
+      const by = pt.personRef.y;
+      if (Math.abs(ex - bx) < 12 && Math.abs(ey - by) < 12) {
+        pt.personRef.blocker = false;
+        pt.personRef.vx = 1.5;
+        SFX.click();
+        return;
+      }
+    }
+  }
+
+  if (selectedTool < 0 || toolCounts[selectedTool] <= 0) return;
+
+  // validate placement
+  if (tx < 0 || tx >= MW || ty < 0 || ty >= MH) return;
+
+  switch (selectedTool) {
+    case TOOL.BRIDGE:
+      // place on a pit/river row
+      placedTools.push({ type: TOOL.BRIDGE, tx, ty });
+      toolCounts[selectedTool]--;
+      SFX.shoot();
+      break;
+    case TOOL.LADDER:
+      // place against a wall
+      placedTools.push({ type: TOOL.LADDER, tx, ty });
+      toolCounts[selectedTool]--;
+      SFX.shoot();
+      break;
+    case TOOL.SIGN:
+      placedTools.push({ type: TOOL.SIGN, tx, ty, dir: 1 });
+      toolCounts[selectedTool]--;
+      SFX.shoot();
+      break;
+    case TOOL.UMBRELLA:
+      placedTools.push({ type: TOOL.UMBRELLA, tx, ty });
+      toolCounts[selectedTool]--;
+      SFX.shoot();
+      break;
+    case TOOL.BLOCKER:
+      // find person near click
+      for (const p of people) {
+        if (!p.alive || p.saved || p.blocker) continue;
+        if (Math.abs(p.x - worldX) < T && Math.abs(p.y - worldY) < T) {
+          p.blocker = true;
+          placedTools.push({ type: TOOL.BLOCKER, tx, ty, personRef: p });
+          toolCounts[selectedTool]--;
+          SFX.shoot();
+          break;
+        }
+      }
+      break;
+  }
+  updateToolbar();
+}
+
+// touch/mouse handling
+let touchStartPos = null, touchStartTime = 0, isDragging = false;
+
+canvas.addEventListener('mousedown', (e) => {
+  touchStartPos = { x: e.clientX, y: e.clientY };
+  touchStartTime = Date.now();
+  cameraDragStart = { x: e.clientX, y: e.clientY };
+  cameraDragCamStart = cameraX;
+  isDragging = false;
+});
+canvas.addEventListener('mousemove', (e) => {
+  if (!touchStartPos) return;
+  const dx = e.clientX - cameraDragStart.x;
+  if (Math.abs(dx) > 8) isDragging = true;
+  if (isDragging) {
+    cameraX = Math.max(0, Math.min(MW * T - canvasW, cameraDragCamStart - dx));
+  }
+});
+canvas.addEventListener('mouseup', (e) => {
+  if (!isDragging && touchStartPos) {
+    const pos = getEventPos(e);
+    handleTap(pos.x, pos.y);
+  }
+  touchStartPos = null;
+  isDragging = false;
+});
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  touchStartPos = { x: t.clientX, y: t.clientY };
+  touchStartTime = Date.now();
+  cameraDragStart = { x: t.clientX, y: t.clientY };
+  cameraDragCamStart = cameraX;
+  isDragging = false;
+});
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (!touchStartPos || e.touches.length === 0) return;
+  const t = e.touches[0];
+  const dx = t.clientX - cameraDragStart.x;
+  if (Math.abs(dx) > 8) isDragging = true;
+  if (isDragging) {
+    cameraX = Math.max(0, Math.min(MW * T - canvasW, cameraDragCamStart - dx));
+  }
+});
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (!isDragging && touchStartPos) {
+    const pos = { x: touchStartPos.x, y: touchStartPos.y - 30 };
+    handleTap(pos.x, pos.y);
+  }
+  touchStartPos = null;
+  isDragging = false;
+});
+
+// ─── GAME LOOP (fixed timestep) ───
+const TICK = 1000 / 60;
+let lastTime = 0, accumulator = 0;
+
+function gameLoop(ts) {
+  requestAnimationFrame(gameLoop);
+  if (!window._gameReady) return;
+
+  const dt = Math.min(ts - lastTime, 100);
+  lastTime = ts;
+  accumulator += dt;
+
+  while (accumulator >= TICK) {
+    update();
+    accumulator -= TICK;
+  }
+  draw();
+}
+
+// ─── START ───
+function boot() {
+  if (window._gameReady) {
+    showLevelIntro();
+    requestAnimationFrame(gameLoop);
+  } else {
+    window.addEventListener('gameready', () => {
+      showLevelIntro();
+      requestAnimationFrame(gameLoop);
+    });
+  }
+}
+boot();
+
+</script>
+</body></html>

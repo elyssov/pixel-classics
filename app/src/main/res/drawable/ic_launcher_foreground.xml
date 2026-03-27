@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!--
+        "PC" in chunky pixel-block style, bright cyan on transparent.
+        Each block is 7x7 units. Grid origin: X=22.5, Y=29.5
+        P = 4 cols, C = 4 cols, 1 col gap between = 9 cols total.
+
+        Letter P (4x7 grid):
+        Row 0: █ █ █ .
+        Row 1: █ . . █
+        Row 2: █ . . █
+        Row 3: █ █ █ .
+        Row 4: █ . . .
+        Row 5: █ . . .
+        Row 6: █ . . .
+
+        Letter C (4x7 grid, starting at col 5):
+        Row 0: . █ █ █
+        Row 1: █ . . .
+        Row 2: █ . . .
+        Row 3: █ . . .
+        Row 4: █ . . .
+        Row 5: █ . . .
+        Row 6: . █ █ █
+    -->
+
+    <!-- === LETTER P === -->
+    <!-- Row 0: cols 0,1,2 -->
+    <path android:fillColor="#00FFFF" android:pathData="M22.5,29.5h7v7h-7z" />
+    <path android:fillColor="#00FFFF" android:pathData="M29.5,29.5h7v7h-7z" />
+    <path android:fillColor="#00FFFF" android:pathData="M36.5,29.5h7v7h-7z" />
+    <!-- Row 1: cols 0,3 -->
+    <path android:fillColor="#00FFFF" android:pathData="M22.5,36.5h7v7h-7z" />
+    <path android:fillColor="#00FFFF" android:pathData="M43.5,36.5h7v7h-7z" />
+    <!-- Row 2: cols 0,3 -->
+    <path android:fillColor="#00FFFF" android:pathData="M22.5,43.5h7v7h-7z" />
+    <path android:fillColor="#00FFFF" android:pathData="M43.5,43.5h7v7h-7z" />
+    <!-- Row 3: cols 0,1,2 -->
+    <path android:fillColor="#00FFFF" android:pathData="M22.5,50.5h7v7h-7z" />
+    <path android:fillColor="#00FFFF" android:pathData="M29.5,50.5h7v7h-7z" />
+    <path android:fillColor="#00FFFF" android:pathData="M36.5,50.5h7v7h-7z" />
+    <!-- Row 4: col 0 -->
+    <path android:fillColor="#00FFFF" android:pathData="M22.5,57.5h7v7h-7z" />
+    <!-- Row 5: col 0 -->
+    <path android:fillColor="#00FFFF" android:pathData="M22.5,64.5h7v7h-7z" />
+    <!-- Row 6: col 0 -->
+    <path android:fillColor="#00FFFF" android:pathData="M22.5,71.5h7v7h-7z" />
+
+    <!-- === LETTER C (offset by 5 cols = 35 units) === -->
+    <!-- Row 0: cols 6,7,8 (skip col 5) -->
+    <path android:fillColor="#00FFFF" android:pathData="M64.5,29.5h7v7h-7z" />
+    <path android:fillColor="#00FFFF" android:pathData="M71.5,29.5h7v7h-7z" />
+    <path android:fillColor="#00FFFF" android:pathData="M78.5,29.5h7v7h-7z" />
+    <!-- Row 1: col 5 -->
+    <path android:fillColor="#00FFFF" android:pathData="M57.5,36.5h7v7h-7z" />
+    <!-- Row 2: col 5 -->
+    <path android:fillColor="#00FFFF" android:pathData="M57.5,43.5h7v7h-7z" />
+    <!-- Row 3: col 5 -->
+    <path android:fillColor="#00FFFF" android:pathData="M57.5,50.5h7v7h-7z" />
+    <!-- Row 4: col 5 -->
+    <path android:fillColor="#00FFFF" android:pathData="M57.5,57.5h7v7h-7z" />
+    <!-- Row 5: col 5 -->
+    <path android:fillColor="#00FFFF" android:pathData="M57.5,64.5h7v7h-7z" />
+    <!-- Row 6: cols 6,7,8 -->
+    <path android:fillColor="#00FFFF" android:pathData="M64.5,71.5h7v7h-7z" />
+    <path android:fillColor="#00FFFF" android:pathData="M71.5,71.5h7v7h-7z" />
+    <path android:fillColor="#00FFFF" android:pathData="M78.5,71.5h7v7h-7z" />
+
+</vector>
