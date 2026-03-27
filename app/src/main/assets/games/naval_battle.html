@@ -1610,6 +1610,139 @@ function stopAmbient() {
     ambientNode = null;
     ambientGain = null;
   }
+  stopDasBootTheme();
+}
+
+// ── Das Boot Main Theme (Klaus Doldinger) — Web Audio synthesis ──
+let dasBootPlaying = false;
+let dasBootTimeouts = [];
+let dasBootOscillators = [];
+
+function playDasBootTheme() {
+  if (!soundEnabled || dasBootPlaying) return;
+  dasBootPlaying = true;
+  try {
+    const ctx = getAudioCtx();
+    const now = ctx.currentTime;
+
+    // Master gain for the theme
+    const master = ctx.createGain();
+    master.gain.value = 0.07;
+    master.connect(ctx.destination);
+
+    // Reverb via delay feedback
+    const delay = ctx.createDelay(0.5);
+    delay.delayTime.value = 0.25;
+    const feedback = ctx.createGain();
+    feedback.gain.value = 0.3;
+    const reverbGain = ctx.createGain();
+    reverbGain.gain.value = 0.4;
+    delay.connect(feedback);
+    feedback.connect(delay);
+    delay.connect(reverbGain);
+    reverbGain.connect(master);
+
+    // Das Boot main theme — the haunting melody
+    // Notes: [frequency, startTime, duration]
+    // Key of E minor, tempo ~100bpm, beat = 0.6s
+    const b = 0.55; // beat duration
+    const melody = [
+      // Phrase 1: E4 E4 F#4 G4 A4 G4 F#4 E4
+      [329.63, 0,     b*0.9],    // E4
+      [329.63, b,     b*0.9],    // E4
+      [369.99, b*2,   b*0.9],    // F#4
+      [392.00, b*3,   b*1.8],    // G4 (held)
+      [440.00, b*5,   b*0.9],    // A4
+      [392.00, b*6,   b*0.9],    // G4
+      [369.99, b*7,   b*0.9],    // F#4
+      [329.63, b*8,   b*1.8],    // E4 (held)
+
+      // Phrase 2: D4 D4 E4 F#4 G4 F#4 E4 D4
+      [293.66, b*10,  b*0.9],    // D4
+      [293.66, b*11,  b*0.9],    // D4
+      [329.63, b*12,  b*0.9],    // E4
+      [369.99, b*13,  b*1.8],    // F#4 (held)
+      [392.00, b*15,  b*0.9],    // G4
+      [369.99, b*16,  b*0.9],    // F#4
+      [329.63, b*17,  b*0.9],    // E4
+      [293.66, b*18,  b*1.8],    // D4 (held)
+
+      // Phrase 3: C4 C4 D4 E4 F#4 E4 D4 C4
+      [261.63, b*20,  b*0.9],    // C4
+      [261.63, b*21,  b*0.9],    // C4
+      [293.66, b*22,  b*0.9],    // D4
+      [329.63, b*23,  b*1.8],    // E4 (held)
+      [369.99, b*25,  b*0.9],    // F#4
+      [329.63, b*26,  b*0.9],    // E4
+      [293.66, b*27,  b*0.9],    // D4
+      [261.63, b*28,  b*1.8],    // C4 (held)
+
+      // Phrase 4 (resolution): B3 C4 D4 E4 (rising, held)
+      [246.94, b*30,  b*0.9],    // B3
+      [261.63, b*31,  b*0.9],    // C4
+      [293.66, b*32,  b*0.9],    // D4
+      [329.63, b*33,  b*3.0],    // E4 (long hold, fade)
+    ];
+
+    // Bass line — octave lower, simple root notes
+    const bass = [
+      [164.81, 0,     b*4],      // E3
+      [164.81, b*5,   b*4.5],    // E3
+      [146.83, b*10,  b*4],      // D3
+      [146.83, b*15,  b*4.5],    // D3
+      [130.81, b*20,  b*4],      // C3
+      [130.81, b*25,  b*4.5],    // C3
+      [123.47, b*30,  b*3],      // B2
+      [164.81, b*33,  b*3.0],    // E3
+    ];
+
+    function playNote(freq, start, dur, isBass) {
+      const osc = ctx.createOscillator();
+      const env = ctx.createGain();
+      // Melody: warm sawtooth filtered; bass: triangle
+      osc.type = isBass ? 'triangle' : 'sawtooth';
+      osc.frequency.value = freq;
+
+      // Low-pass filter for warmth (synth pad feel)
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = isBass ? 400 : 1200;
+      filter.Q.value = 1;
+
+      osc.connect(filter);
+      filter.connect(env);
+      env.connect(delay); // through reverb
+      env.connect(master); // dry signal too
+
+      // Envelope
+      const t0 = now + start;
+      env.gain.setValueAtTime(0, t0);
+      env.gain.linearRampToValueAtTime(isBass ? 0.5 : 0.8, t0 + 0.05);
+      env.gain.setValueAtTime(isBass ? 0.5 : 0.8, t0 + dur * 0.7);
+      env.gain.linearRampToValueAtTime(0, t0 + dur);
+
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.1);
+      dasBootOscillators.push(osc);
+    }
+
+    melody.forEach(n => playNote(n[0], n[1], n[2], false));
+    bass.forEach(n => playNote(n[0], n[1], n[2], true));
+
+    // Auto-stop flag after melody ends
+    const totalDur = (b * 36) * 1000;
+    const tid = setTimeout(() => { dasBootPlaying = false; }, totalDur);
+    dasBootTimeouts.push(tid);
+
+  } catch(e) { dasBootPlaying = false; }
+}
+
+function stopDasBootTheme() {
+  dasBootPlaying = false;
+  dasBootTimeouts.forEach(t => clearTimeout(t));
+  dasBootTimeouts = [];
+  dasBootOscillators.forEach(o => { try { o.stop(); } catch(e) {} });
+  dasBootOscillators = [];
 }
 
 function playSound(name) {
@@ -3509,6 +3642,7 @@ function startBattle() {
   showBattle();
   updateSoundButton();
   startAmbient();
+  playDasBootTheme();
 
   // Size canvases
   const fc = document.getElementById('fleet-canvas');
