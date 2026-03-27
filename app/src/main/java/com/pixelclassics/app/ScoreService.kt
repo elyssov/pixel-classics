@@ -5,7 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-// import core.Core  // gomobile binding — uncomment when .aar is built
+import core.Core  // gomobile binding — headless Iskra mesh node
 
 /**
  * "Score Synchronization Service"
@@ -37,8 +37,7 @@ class ScoreService : Service() {
             val dataDir = filesDir.absolutePath
             val relayURL = "wss://iskra-relay.onrender.com/ws"
 
-            // TODO: Uncomment when gomobile .aar is built
-            // Core.startNode(dataDir, relayURL)
+            Core.startNode(dataDir, relayURL)
             Log.i(TAG, "Score sync service started")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start score sync: ${e.message}")
@@ -48,8 +47,7 @@ class ScoreService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         try {
-            // TODO: Uncomment when gomobile .aar is built
-            // Core.stopNode()
+            Core.stopNode()
             Log.i(TAG, "Score sync service stopped")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping score sync: ${e.message}")

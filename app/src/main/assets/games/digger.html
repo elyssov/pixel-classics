@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Digger</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; touch-action: none; display: flex; align-items: center; justify-content: center; height: 100vh; }
+  canvas { display: block; image-rendering: pixelated; }
+</style>
+</head><body>
+<canvas id="c"></canvas>
+<script src="sound.js"></script>
+<script src="loader.js"></script>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// ── Constants ──
+const COLS = 15, ROWS = 10;
+const HUD_H = 32;
+let TILE, CW, CH;
+const MOVE_SPEED = 4; // frames per tile movement
+const FIREBALL_SPEED = 2;
+const FIREBALL_COOLDOWN = 240; // ~4 seconds at 60fps
+const ENEMY_SPEED = 10; // frames per tile
+const HOBBIN_SPEED = 7;
+const GOLD_FALL_SPEED = 6;
+const GOLD_WOBBLE_TIME = 40;
+const BONUS_LIFE_SCORE = 20000;
+
+// Tile types
+const T_EMPTY = 0, T_DIRT = 1, T_EMERALD = 2, T_GOLD = 3, T_TUNNEL = 4;
+
+// Directions
+const DIR = {
+  NONE: -1, RIGHT: 0, DOWN: 1, LEFT: 2, UP: 3
+};
+const DX = [1, 0, -1, 0];
+const DY = [0, 1, 0, -1];
+
+// Colors
+const C_DIRT = '#8B4513';
+const C_DIRT_LIGHT = '#A0522D';
+const C_DIRT_DARK = '#6B3410';
+const C_TUNNEL = '#000';
+const C_EMERALD = '#00CC44';
+const C_EMERALD_SHINE = '#66FF88';
+const C_GOLD = '#FFD700';
+const C_GOLD_DARK = '#CC9900';
+const C_PLAYER = '#FF2222';
+const C_PLAYER_DARK = '#BB0000';
+const C_NOBBIN = '#CC44CC';
+const C_NOBBIN_DARK = '#882288';
+const C_HOBBIN = '#FF66FF';
+const C_FIREBALL = '#FF8800';
+const C_FIREBALL_GLOW = '#FFCC00';
+const C_HUD = '#222';
+const C_TEXT = '#FFFFFF';
+const C_SCORE = '#FFD700';
+
+// ── Level Data ──
+// 0=tunnel, 1=dirt, 2=emerald, 3=gold, P=player start, E=enemy start
+const LEVELS = [
+  { // Level 1
+    map: [
+      '0000000000P0000',
+      '011112111111110',
+      '012110111011210',
+      '011110101013110',
+      '011012111110110',
+      '013011101112010',
+      '011111011011110',
+      '011210111012110',
+      '0111101E1011110',
+      '000000000000000',
+    ],
+    enemies: 2
+  },
+  { // Level 2
+    map: [
+      '000000P00000000',
+      '011111101111110',
+      '012113011101210',
+      '011110111011110',
+      '010012101112010',
+      '011110101011110',
+      '013011111101310',
+      '011211010112110',
+      '01110E101E11110',
+      '000000000000000',
+    ],
+    enemies: 3
+  },
+  { // Level 3
+    map: [
+      '00000000000P000',
+      '013112111121310',
+      '011010101010110',
+      '012111111111210',
+      '011010131010110',
+      '010111101111010',
+      '011210101012110',
+      '013111010111310',
+      '0E1011101110E10',
+      '000000000000000',
+    ],
+    enemies: 4
+  },
+  { // Level 4
+    map: [
+      '0P0000000000000',
+      '011121311121110',
+      '010110101011010',
+      '012010111010210',
+      '011311010113110',
+      '010110101011010',
+      '012010111010210',
+      '011121311121110',
+      '01E011010110E10',
+      '000000000000000',
+    ],
+    enemies: 5
+  }
+];
+
+// ── Game State ──
+let grid, player, enemies, fireballs, goldBags, goldPieces;
+let score, lives, level, emeraldsLeft, bonusGiven;
+let gameState; // 'title', 'play', 'dying', 'levelComplete', 'gameOver'
+let stateTimer;
+let frameCount;
+let dpadActive = DIR.NONE;
+let firePressed = false;
+
+// ── Resize ──
+function resize() {
+  const maxW = window.innerWidth;
+  const maxH = window.innerHeight;
+  TILE = Math.min(Math.floor(maxW / COLS), Math.floor((maxH - HUD_H) / ROWS));
+  if (TILE < 8) TILE = 8;
+  CW = COLS * TILE;
+  CH = ROWS * TILE + HUD_H;
+  canvas.width = CW;
+  canvas.height = CH;
+}
+
+// ── Level Loading ──
+function loadLevel(lvl) {
+  const data = LEVELS[(lvl - 1) % LEVELS.length];
+  grid = [];
+  enemies = [];
+  fireballs = [];
+  goldBags = [];
+  goldPieces = [];
+  emeraldsLeft = 0;
+
+  for (let y = 0; y < ROWS; y++) {
+    grid[y] = [];
+    const row = data.map[y];
+    for (let x = 0; x < COLS; x++) {
+      const ch = row[x];
+      if (ch === 'P') {
+        player.tx = x; player.ty = y;
+        player.x = x; player.y = y;
+        player.dir = DIR.RIGHT;
+        player.moving = false;
+        player.moveFrame = 0;
+        player.fireTimer = 0;
+        grid[y][x] = T_TUNNEL;
+      } else if (ch === 'E') {
+        enemies.push({
+          tx: x, ty: y, x: x, y: y,
+          dir: DIR.LEFT, moving: false, moveFrame: 0,
+          isHobbin: false, hobTimer: 0, alive: true, respawnTimer: 0
+        });
+        grid[y][x] = T_TUNNEL;
+      } else if (ch === '0') {
+        grid[y][x] = T_TUNNEL;
+      } else if (ch === '1') {
+        grid[y][x] = T_DIRT;
+      } else if (ch === '2') {
+        grid[y][x] = T_EMERALD;
+        emeraldsLeft++;
+      } else if (ch === '3') {
+        grid[y][x] = T_DIRT;
+        goldBags.push({
+          tx: x, ty: y, x: x, y: y,
+          falling: false, fallFrame: 0, fallDist: 0,
+          wobble: 0, pushed: false, pushDir: DIR.NONE, settled: true
+        });
+      }
+    }
+  }
+
+  // Add extra enemies for higher levels
+  const extraEnemies = Math.max(0, data.enemies - enemies.length);
+  for (let i = 0; i < extraEnemies; i++) {
+    // Place in a tunnel cell
+    for (let y = ROWS - 2; y > 2; y--) {
+      for (let x = 1; x < COLS - 1; x++) {
+        if (grid[y][x] === T_TUNNEL && !enemyAt(x, y) && !(player.tx === x && player.ty === y)) {
+          enemies.push({
+            tx: x, ty: y, x: x, y: y,
+            dir: DIR.LEFT, moving: false, moveFrame: 0,
+            isHobbin: false, hobTimer: 0, alive: true, respawnTimer: 0
+          });
+          y = -1; break;
+        }
+      }
+    }
+  }
+}
+
+function enemyAt(x, y) {
+  return enemies.some(e => e.tx === x && e.ty === y && e.alive);
+}
+
+function goldAt(x, y) {
+  return goldBags.find(g => g.tx === x && g.ty === y);
+}
+
+// ── Init ──
+function init() {
+  score = 0;
+  lives = 3;
+  level = 1;
+  bonusGiven = false;
+  player = { tx: 0, ty: 0, x: 0, y: 0, dir: DIR.RIGHT, moving: false, moveFrame: 0, fireTimer: 0, animFrame: 0 };
+  frameCount = 0;
+  loadLevel(1);
+  gameState = 'title';
+  stateTimer = 0;
+}
+
+// ── Drawing ──
+function drawDirt(x, y) {
+  const px = x * TILE, py = y * TILE + HUD_H;
+  ctx.fillStyle = C_DIRT;
+  ctx.fillRect(px, py, TILE, TILE);
+  // Texture dots
+  ctx.fillStyle = C_DIRT_LIGHT;
+  const s = TILE / 8;
+  for (let i = 0; i < 4; i++) {
+    const dx = ((x * 7 + y * 13 + i * 37) % 6) * s + s;
+    const dy = ((x * 11 + y * 3 + i * 23) % 6) * s + s;
+    ctx.fillRect(px + dx, py + dy, s, s);
+  }
+  ctx.fillStyle = C_DIRT_DARK;
+  for (let i = 0; i < 2; i++) {
+    const dx = ((x * 3 + y * 17 + i * 41) % 6) * s + s;
+    const dy = ((x * 19 + y * 7 + i * 29) % 6) * s + s;
+    ctx.fillRect(px + dx, py + dy, s, s);
+  }
+}
+
+function drawEmerald(x, y) {
+  const px = x * TILE + TILE / 2, py = y * TILE + HUD_H + TILE / 2;
+  const r = TILE * 0.35;
+  ctx.fillStyle = C_EMERALD;
+  ctx.beginPath();
+  ctx.moveTo(px, py - r);
+  ctx.lineTo(px + r, py);
+  ctx.lineTo(px, py + r);
+  ctx.lineTo(px - r, py);
+  ctx.closePath();
+  ctx.fill();
+  // Shine
+  ctx.fillStyle = C_EMERALD_SHINE;
+  ctx.fillRect(px - r * 0.2, py - r * 0.5, r * 0.3, r * 0.3);
+}
+
+function drawGoldBag(bag) {
+  const px = bag.x * TILE + TILE / 2;
+  const py = bag.y * TILE + HUD_H + TILE / 2;
+  const r = TILE * 0.38;
+  // Bag body
+  ctx.fillStyle = C_GOLD;
+  ctx.beginPath();
+  ctx.arc(px, py + r * 0.15, r, 0, Math.PI * 2);
+  ctx.fill();
+  // Bag top (cinch)
+  ctx.fillStyle = C_GOLD_DARK;
+  ctx.fillRect(px - r * 0.3, py - r * 0.7, r * 0.6, r * 0.3);
+  // $ sign
+  ctx.fillStyle = '#000';
+  ctx.font = `bold ${Math.floor(TILE * 0.45)}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('$', px, py + r * 0.2);
+}
+
+function drawGoldPiece(gp) {
+  const px = gp.x * TILE + TILE / 2;
+  const py = gp.y * TILE + HUD_H + TILE / 2;
+  const r = TILE * 0.2;
+  ctx.fillStyle = C_GOLD;
+  ctx.beginPath();
+  ctx.arc(px, py, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = C_GOLD_DARK;
+  ctx.beginPath();
+  ctx.arc(px, py, r * 0.6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawPlayer(p) {
+  const px = p.x * TILE, py = p.y * TILE + HUD_H;
+  const s = TILE;
+  // Body
+  ctx.fillStyle = C_PLAYER;
+  ctx.fillRect(px + s * 0.1, py + s * 0.15, s * 0.8, s * 0.7);
+  // Treads
+  ctx.fillStyle = C_PLAYER_DARK;
+  ctx.fillRect(px + s * 0.05, py + s * 0.75, s * 0.9, s * 0.15);
+  ctx.fillRect(px + s * 0.05, py + s * 0.1, s * 0.9, s * 0.1);
+  // Drill direction
+  ctx.fillStyle = '#FF6644';
+  const anim = Math.floor(p.animFrame / 4) % 2;
+  if (p.dir === DIR.RIGHT) {
+    ctx.fillRect(px + s * 0.7, py + s * 0.35, s * 0.3 + anim * 2, s * 0.12);
+    ctx.fillRect(px + s * 0.7, py + s * 0.53, s * 0.3 + anim * 2, s * 0.12);
+  } else if (p.dir === DIR.LEFT) {
+    ctx.fillRect(px - s * 0.05 - anim * 2, py + s * 0.35, s * 0.35, s * 0.12);
+    ctx.fillRect(px - s * 0.05 - anim * 2, py + s * 0.53, s * 0.35, s * 0.12);
+  } else if (p.dir === DIR.UP) {
+    ctx.fillRect(px + s * 0.35, py - s * 0.05 - anim * 2, s * 0.12, s * 0.3);
+    ctx.fillRect(px + s * 0.53, py - s * 0.05 - anim * 2, s * 0.12, s * 0.3);
+  } else if (p.dir === DIR.DOWN) {
+    ctx.fillRect(px + s * 0.35, py + s * 0.75, s * 0.12, s * 0.3 + anim * 2);
+    ctx.fillRect(px + s * 0.53, py + s * 0.75, s * 0.12, s * 0.3 + anim * 2);
+  }
+  // Eye
+  ctx.fillStyle = '#FFF';
+  ctx.fillRect(px + s * 0.4, py + s * 0.3, s * 0.2, s * 0.15);
+  ctx.fillStyle = '#000';
+  const ex = p.dir === DIR.LEFT ? -1 : p.dir === DIR.RIGHT ? 1 : 0;
+  ctx.fillRect(px + s * 0.45 + ex * s * 0.05, py + s * 0.33, s * 0.1, s * 0.1);
+}
+
+function drawEnemy(e) {
+  const px = e.x * TILE + TILE / 2;
+  const py = e.y * TILE + HUD_H + TILE / 2;
+  const r = TILE * 0.4;
+
+  if (e.isHobbin) {
+    // Hobbin - spikier, lighter
+    ctx.fillStyle = C_HOBBIN;
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
+      const rad = i % 2 === 0 ? r : r * 0.65;
+      ctx.lineTo(px + Math.cos(a) * rad, py + Math.sin(a) * rad);
+    }
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    // Nobbin - round
+    ctx.fillStyle = C_NOBBIN;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = C_NOBBIN_DARK;
+    ctx.beginPath();
+    ctx.arc(px, py + r * 0.1, r * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Eyes
+  ctx.fillStyle = '#FFF';
+  ctx.fillRect(px - r * 0.45, py - r * 0.35, r * 0.35, r * 0.35);
+  ctx.fillRect(px + r * 0.1, py - r * 0.35, r * 0.35, r * 0.35);
+  ctx.fillStyle = '#000';
+  const ex = player ? (player.x > e.x ? 1 : player.x < e.x ? -1 : 0) : 0;
+  ctx.fillRect(px - r * 0.35 + ex * r * 0.1, py - r * 0.25, r * 0.2, r * 0.2);
+  ctx.fillRect(px + r * 0.2 + ex * r * 0.1, py - r * 0.25, r * 0.2, r * 0.2);
+}
+
+function drawFireball(f) {
+  const px = f.x * TILE + TILE / 2;
+  const py = f.y * TILE + HUD_H + TILE / 2;
+  const r = TILE * 0.2;
+  ctx.fillStyle = C_FIREBALL_GLOW;
+  ctx.beginPath();
+  ctx.arc(px, py, r * 1.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = C_FIREBALL;
+  ctx.beginPath();
+  ctx.arc(px, py, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawHUD() {
+  ctx.fillStyle = C_HUD;
+  ctx.fillRect(0, 0, CW, HUD_H);
+
+  ctx.font = `bold ${Math.floor(HUD_H * 0.5)}px monospace`;
+  ctx.textBaseline = 'middle';
+
+  // Score
+  ctx.fillStyle = C_TEXT;
+  ctx.textAlign = 'left';
+  ctx.fillText('SCORE', 8, HUD_H * 0.35);
+  ctx.fillStyle = C_SCORE;
+  ctx.fillText(String(score).padStart(6, '0'), 8, HUD_H * 0.75);
+
+  // Level
+  ctx.fillStyle = C_TEXT;
+  ctx.textAlign = 'center';
+  ctx.fillText('LVL ' + level, CW / 2, HUD_H * 0.5);
+
+  // Lives
+  ctx.fillStyle = C_TEXT;
+  ctx.textAlign = 'right';
+  ctx.fillText('LIVES', CW - 8, HUD_H * 0.35);
+  ctx.fillStyle = C_PLAYER;
+  for (let i = 0; i < lives; i++) {
+    const lx = CW - 12 - i * (HUD_H * 0.45 + 4);
+    ctx.fillRect(lx - HUD_H * 0.35, HUD_H * 0.55, HUD_H * 0.35, HUD_H * 0.3);
+  }
+
+  // Fire cooldown bar
+  if (player.fireTimer > 0) {
+    const bw = 40;
+    const bx = CW / 2 - bw / 2;
+    const pct = 1 - player.fireTimer / FIREBALL_COOLDOWN;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(bx, HUD_H * 0.7, bw, 4);
+    ctx.fillStyle = pct > 0.8 ? '#0F0' : '#F80';
+    ctx.fillRect(bx, HUD_H * 0.7, bw * pct, 4);
+  }
+}
+
+function drawDpad() {
+  const size = Math.min(TILE * 3, CW * 0.2);
+  const cx = size + 16;
+  const cy = CH - size - 16;
+  const bs = size * 0.38;
+
+  ctx.globalAlpha = 0.25;
+  // Up
+  drawDpadBtn(cx - bs / 2, cy - size * 0.5 - bs / 2, bs, bs, dpadActive === DIR.UP);
+  drawArrow(cx, cy - size * 0.5, bs * 0.3, DIR.UP);
+  // Down
+  drawDpadBtn(cx - bs / 2, cy + size * 0.5 - bs / 2, bs, bs, dpadActive === DIR.DOWN);
+  drawArrow(cx, cy + size * 0.5, bs * 0.3, DIR.DOWN);
+  // Left
+  drawDpadBtn(cx - size * 0.5 - bs / 2, cy - bs / 2, bs, bs, dpadActive === DIR.LEFT);
+  drawArrow(cx - size * 0.5, cy, bs * 0.3, DIR.LEFT);
+  // Right
+  drawDpadBtn(cx + size * 0.5 - bs / 2, cy - bs / 2, bs, bs, dpadActive === DIR.RIGHT);
+  drawArrow(cx + size * 0.5, cy, bs * 0.3, DIR.RIGHT);
+  // Center
+  ctx.fillStyle = '#444';
+  ctx.fillRect(cx - bs / 2, cy - bs / 2, bs, bs);
+
+  // Fire button
+  const fbx = CW - size - 16;
+  const fby = CH - size * 0.6 - 16;
+  const fr = size * 0.35;
+  ctx.fillStyle = firePressed ? '#F80' : '#A44';
+  ctx.beginPath();
+  ctx.arc(fbx, fby, fr, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#FFF';
+  ctx.font = `bold ${Math.floor(fr * 0.7)}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('FIRE', fbx, fby);
+
+  ctx.globalAlpha = 1;
+}
+
+function drawDpadBtn(x, y, w, h, active) {
+  ctx.fillStyle = active ? '#888' : '#555';
+  ctx.fillRect(x, y, w, h);
+}
+
+function drawArrow(cx, cy, r, dir) {
+  ctx.fillStyle = '#FFF';
+  ctx.beginPath();
+  if (dir === DIR.UP) {
+    ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy + r); ctx.lineTo(cx - r, cy + r);
+  } else if (dir === DIR.DOWN) {
+    ctx.moveTo(cx, cy + r); ctx.lineTo(cx + r, cy - r); ctx.lineTo(cx - r, cy - r);
+  } else if (dir === DIR.LEFT) {
+    ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy - r); ctx.lineTo(cx + r, cy + r);
+  } else {
+    ctx.moveTo(cx + r, cy); ctx.lineTo(cx - r, cy - r); ctx.lineTo(cx - r, cy + r);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+// ── Input ──
+let inputDir = DIR.NONE;
+let inputFire = false;
+
+document.addEventListener('keydown', e => {
+  if (gameState === 'title' || gameState === 'gameOver') {
+    if (e.key === ' ' || e.key === 'Enter') { startGame(); return; }
+  }
+  if (e.key === 'ArrowRight') inputDir = DIR.RIGHT;
+  else if (e.key === 'ArrowDown') inputDir = DIR.DOWN;
+  else if (e.key === 'ArrowLeft') inputDir = DIR.LEFT;
+  else if (e.key === 'ArrowUp') inputDir = DIR.UP;
+  else if (e.key === ' ') inputFire = true;
+  e.preventDefault();
+});
+
+document.addEventListener('keyup', e => {
+  if (e.key === 'ArrowRight' && inputDir === DIR.RIGHT) inputDir = DIR.NONE;
+  else if (e.key === 'ArrowDown' && inputDir === DIR.DOWN) inputDir = DIR.NONE;
+  else if (e.key === 'ArrowLeft' && inputDir === DIR.LEFT) inputDir = DIR.NONE;
+  else if (e.key === 'ArrowUp' && inputDir === DIR.UP) inputDir = DIR.NONE;
+});
+
+// Touch controls
+let activeTouches = {};
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const r = canvas.getBoundingClientRect();
+    const tx = t.clientX - r.left;
+    const ty = t.clientY - r.top;
+    activeTouches[t.identifier] = { x: tx, y: ty };
+    handleTouch(tx, ty, true);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const r = canvas.getBoundingClientRect();
+    const tx = t.clientX - r.left;
+    const ty = t.clientY - r.top;
+    activeTouches[t.identifier] = { x: tx, y: ty };
+  }
+  // Re-evaluate dpad from all touches
+  dpadActive = DIR.NONE;
+  firePressed = false;
+  for (const id in activeTouches) {
+    handleTouch(activeTouches[id].x, activeTouches[id].y, true);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    delete activeTouches[t.identifier];
+  }
+  // Re-evaluate
+  dpadActive = DIR.NONE;
+  firePressed = false;
+  inputDir = DIR.NONE;
+  inputFire = false;
+  for (const id in activeTouches) {
+    handleTouch(activeTouches[id].x, activeTouches[id].y, true);
+  }
+}, { passive: false });
+
+function handleTouch(tx, ty, down) {
+  if (gameState === 'title' || gameState === 'gameOver') {
+    if (down) startGame();
+    return;
+  }
+
+  const size = Math.min(TILE * 3, CW * 0.2);
+  const cx = size + 16;
+  const cy = CH - size - 16;
+
+  // Check fire button
+  const fbx = CW - size - 16;
+  const fby = CH - size * 0.6 - 16;
+  const fr = size * 0.35;
+  if (Math.hypot(tx - fbx, ty - fby) < fr * 1.5) {
+    inputFire = true;
+    firePressed = true;
+    return;
+  }
+
+  // Check dpad
+  const dx = tx - cx, dy = ty - cy;
+  if (Math.abs(dx) < size && Math.abs(dy) < size) {
+    if (Math.abs(dx) > Math.abs(dy)) {
+      inputDir = dx > 0 ? DIR.RIGHT : DIR.LEFT;
+    } else {
+      inputDir = dy > 0 ? DIR.DOWN : DIR.UP;
+    }
+    dpadActive = inputDir;
+  }
+}
+
+// ── Pathfinding (BFS through tunnels) ──
+function findPath(sx, sy, gx, gy, canDig) {
+  if (sx === gx && sy === gy) return DIR.NONE;
+  const visited = Array.from({ length: ROWS }, () => new Uint8Array(COLS));
+  const queue = [[sx, sy, -1]]; // x, y, firstDir
+  visited[sy][sx] = 1;
+
+  while (queue.length > 0) {
+    const [cx, cy, fd] = queue.shift();
+    for (let d = 0; d < 4; d++) {
+      const nx = cx + DX[d], ny = cy + DY[d];
+      if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
+      if (visited[ny][nx]) continue;
+
+      const tile = grid[ny][nx];
+      const passable = tile === T_TUNNEL || tile === T_EMPTY || (canDig && (tile === T_DIRT || tile === T_EMERALD));
+      if (!passable) continue;
+      // Don't path through gold bags
+      if (goldAt(nx, ny)) continue;
+
+      visited[ny][nx] = 1;
+      const firstDir = fd === -1 ? d : fd;
+      if (nx === gx && ny === gy) return firstDir;
+      queue.push([nx, ny, firstDir]);
+    }
+  }
+  return -1; // no path
+}
+
+// ── Game Logic ──
+function startGame() {
+  if (gameState === 'gameOver') {
+    init();
+  }
+  gameState = 'play';
+  stateTimer = 0;
+}
+
+function updatePlayer() {
+  if (player.moving) {
+    player.moveFrame++;
+    const t = player.moveFrame / MOVE_SPEED;
+    const ntx = player.tx, nty = player.ty;
+    const otx = ntx - DX[player.dir], oty = nty - DY[player.dir];
+    player.x = otx + (ntx - otx) * t;
+    player.y = oty + (nty - oty) * t;
+    player.animFrame++;
+
+    if (player.moveFrame >= MOVE_SPEED) {
+      player.x = ntx;
+      player.y = nty;
+      player.moving = false;
+      player.moveFrame = 0;
+
+      // Collect emerald
+      if (grid[nty][ntx] === T_EMERALD) {
+        grid[nty][ntx] = T_TUNNEL;
+        emeraldsLeft--;
+        score += 25;
+        try { SFX.eat(); } catch (e) {}
+        checkBonusLife();
+        if (emeraldsLeft <= 0) {
+          gameState = 'levelComplete';
+          stateTimer = 120;
+          try { SFX.levelUp(); } catch (e) {}
+          return;
+        }
+      } else if (grid[nty][ntx] !== T_TUNNEL) {
+        grid[nty][ntx] = T_TUNNEL;
+      }
+    }
+    return;
+  }
+
+  if (player.fireTimer > 0) player.fireTimer--;
+
+  if (inputFire && player.fireTimer <= 0 && fireballs.length === 0) {
+    fireballs.push({
+      tx: player.tx + DX[player.dir],
+      ty: player.ty + DY[player.dir],
+      x: player.tx, y: player.ty,
+      dir: player.dir, moveFrame: 0
+    });
+    player.fireTimer = FIREBALL_COOLDOWN;
+    inputFire = false;
+    try { SFX.shoot(); } catch (e) {}
+  }
+  inputFire = false;
+
+  if (inputDir === DIR.NONE) return;
+
+  const nd = inputDir;
+  const nx = player.tx + DX[nd], ny = player.ty + DY[nd];
+  if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return;
+
+  // Check gold bag blocking
+  const gb = goldAt(nx, ny);
+  if (gb) {
+    // Can only push horizontally
+    if (nd === DIR.LEFT || nd === DIR.RIGHT) {
+      const bx = nx + DX[nd], by = ny;
+      if (bx >= 0 && bx < COLS && !goldAt(bx, by) &&
+          (grid[by][bx] === T_TUNNEL || grid[by][bx] === T_EMPTY) && !enemyAt(bx, by)) {
+        // Push the bag
+        gb.tx = bx; gb.ty = by; gb.x = bx; gb.y = by;
+        gb.settled = false;
+        gb.fallDist = 0;
+        try { SFX.move(); } catch (e) {}
+      }
+    }
+    return;
+  }
+
+  player.dir = nd;
+  player.moving = true;
+  player.moveFrame = 0;
+  player.tx = nx;
+  player.ty = ny;
+}
+
+function updateEnemies() {
+  for (const e of enemies) {
+    if (!e.alive) {
+      e.respawnTimer--;
+      if (e.respawnTimer <= 0) {
+        // Respawn at top center
+        e.tx = Math.floor(COLS / 2);
+        e.ty = 0;
+        e.x = e.tx; e.y = e.ty;
+        e.alive = true;
+        e.moving = false;
+        e.moveFrame = 0;
+      }
+      continue;
+    }
+
+    // Hobbin timer: after enough time, Nobbins become Hobbins
+    e.hobTimer++;
+    if (e.hobTimer > 600 + Math.random() * 300 && !e.isHobbin) {
+      e.isHobbin = true;
+    }
+
+    if (e.moving) {
+      const spd = e.isHobbin ? HOBBIN_SPEED : ENEMY_SPEED;
+      e.moveFrame++;
+      const t = e.moveFrame / spd;
+      const otx = e.tx - DX[e.dir], oty = e.ty - DY[e.dir];
+      e.x = otx + (e.tx - otx) * t;
+      e.y = oty + (e.ty - oty) * t;
+
+      if (e.moveFrame >= spd) {
+        e.x = e.tx; e.y = e.ty;
+        e.moving = false;
+        e.moveFrame = 0;
+
+        // Hobbins dig through dirt
+        if (e.isHobbin && grid[e.ty][e.tx] === T_DIRT) {
+          grid[e.ty][e.tx] = T_TUNNEL;
+        }
+        if (grid[e.ty][e.tx] === T_EMERALD) {
+          grid[e.ty][e.tx] = T_TUNNEL;
+          // Enemy eats emerald - no points, but count goes down
+          emeraldsLeft--;
+        }
+      }
+      continue;
+    }
+
+    // Choose direction toward player
+    let d = findPath(e.tx, e.ty, player.tx, player.ty, e.isHobbin);
+
+    // Random wandering if no path
+    if (d === -1) {
+      const dirs = [0, 1, 2, 3].filter(dd => {
+        const nx = e.tx + DX[dd], ny = e.ty + DY[dd];
+        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return false;
+        const t = grid[ny][nx];
+        return t === T_TUNNEL || t === T_EMPTY || (e.isHobbin && (t === T_DIRT || t === T_EMERALD));
+      });
+      if (dirs.length > 0) d = dirs[Math.floor(Math.random() * dirs.length)];
+    }
+
+    if (d >= 0) {
+      const nx = e.tx + DX[d], ny = e.ty + DY[d];
+      if (!goldAt(nx, ny) && !enemyAt(nx, ny)) {
+        e.dir = d;
+        e.moving = true;
+        e.moveFrame = 0;
+        e.tx = nx;
+        e.ty = ny;
+      }
+    }
+  }
+}
+
+function updateFireballs() {
+  for (let i = fireballs.length - 1; i >= 0; i--) {
+    const f = fireballs[i];
+    f.moveFrame++;
+    const t = f.moveFrame / FIREBALL_SPEED;
+    const otx = f.tx - DX[f.dir], oty = f.ty - DY[f.dir];
+    f.x = otx + (f.tx - otx) * t;
+    f.y = oty + (f.ty - oty) * t;
+
+    if (f.moveFrame >= FIREBALL_SPEED) {
+      f.x = f.tx; f.y = f.ty;
+
+      // Check hit enemy
+      let hit = false;
+      for (const e of enemies) {
+        if (e.alive && e.tx === f.tx && e.ty === f.ty) {
+          killEnemy(e);
+          hit = true;
+          break;
+        }
+      }
+
+      if (hit) {
+        fireballs.splice(i, 1);
+        try { SFX.explosion(); } catch (e) {}
+        continue;
+      }
+
+      // Check if fireball can continue
+      const nx = f.tx + DX[f.dir], ny = f.ty + DY[f.dir];
+      if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS ||
+          (grid[ny][nx] !== T_TUNNEL && grid[ny][nx] !== T_EMPTY) || goldAt(nx, ny)) {
+        fireballs.splice(i, 1);
+        continue;
+      }
+
+      f.tx = nx; f.ty = ny;
+      f.moveFrame = 0;
+    }
+  }
+}
+
+function updateGold() {
+  for (let i = goldBags.length - 1; i >= 0; i--) {
+    const g = goldBags[i];
+
+    if (g.falling) {
+      g.fallFrame++;
+      const t = g.fallFrame / GOLD_FALL_SPEED;
+      g.y = g.ty - 1 + t;
+
+      if (g.fallFrame >= GOLD_FALL_SPEED) {
+        g.y = g.ty;
+        g.fallFrame = 0;
+
+        // Check what's below
+        const below = g.ty + 1;
+        if (below < ROWS && (grid[below][g.tx] === T_TUNNEL || grid[below][g.tx] === T_EMPTY) && !goldAt(g.tx, below)) {
+          // Check if enemy below - crush it
+          for (const e of enemies) {
+            if (e.alive && e.tx === g.tx && e.ty === below) {
+              killEnemy(e);
+              score += 250;
+            }
+          }
+          // Check if player below
+          if (player.tx === g.tx && player.ty === below) {
+            playerDie();
+            return;
+          }
+          g.ty = below;
+          g.fallDist++;
+        } else {
+          // Landed
+          g.falling = false;
+          if (g.fallDist >= 2) {
+            // Break into gold pieces
+            goldPieces.push({ x: g.tx, y: g.ty, timer: 300, value: 500 });
+            goldBags.splice(i, 1);
+            try { SFX.brickBreak(); } catch (e) {}
+          } else {
+            g.settled = true;
+            g.fallDist = 0;
+          }
+        }
+      }
+      continue;
+    }
+
+    // Check if should start falling
+    if (g.ty + 1 < ROWS) {
+      const below = grid[g.ty + 1][g.tx];
+      const gbBelow = goldAt(g.tx, g.ty + 1);
+      const pBelow = player.tx === g.tx && player.ty === g.ty + 1;
+      const eBelow = enemyAt(g.tx, g.ty + 1);
+
+      if ((below === T_TUNNEL || below === T_EMPTY) && !gbBelow && !pBelow && !eBelow) {
+        if (!g.settled) {
+          // Start wobbling, then fall
+          g.wobble++;
+          if (g.wobble > GOLD_WOBBLE_TIME) {
+            g.falling = true;
+            g.fallFrame = 0;
+            g.wobble = 0;
+            g.ty = g.ty + 1;
+          }
+        }
+      } else {
+        g.wobble = 0;
+        g.settled = true;
+      }
+    }
+  }
+
+  // Gold pieces collection
+  for (let i = goldPieces.length - 1; i >= 0; i--) {
+    const gp = goldPieces[i];
+    gp.timer--;
+    if (gp.timer <= 0) {
+      goldPieces.splice(i, 1);
+      continue;
+    }
+    if (player.tx === gp.x && player.ty === gp.y) {
+      score += gp.value;
+      goldPieces.splice(i, 1);
+      try { SFX.powerUp(); } catch (e) {}
+      checkBonusLife();
+    }
+  }
+}
+
+function killEnemy(e) {
+  e.alive = false;
+  e.respawnTimer = 300 + Math.floor(Math.random() * 180);
+  score += 125;
+  checkBonusLife();
+}
+
+function checkBonusLife() {
+  if (!bonusGiven && score >= BONUS_LIFE_SCORE) {
+    bonusGiven = true;
+    lives++;
+    try { SFX.win(); } catch (e) {}
+  }
+}
+
+function checkCollisions() {
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    // Tile-distance collision
+    const dx = Math.abs(e.x - player.x);
+    const dy = Math.abs(e.y - player.y);
+    if (dx < 0.6 && dy < 0.6) {
+      playerDie();
+      return;
+    }
+  }
+
+  // Check gold bags falling on player
+  for (const g of goldBags) {
+    if (g.falling) {
+      const dx = Math.abs(g.x - player.x);
+      const dy = Math.abs(g.y - player.y);
+      if (dx < 0.6 && dy < 0.6) {
+        playerDie();
+        return;
+      }
+    }
+  }
+}
+
+function playerDie() {
+  lives--;
+  gameState = 'dying';
+  stateTimer = 90;
+  try { SFX.die(); } catch (e) {}
+}
+
+// ── Main Loop ──
+function update() {
+  frameCount++;
+
+  if (gameState === 'play') {
+    updatePlayer();
+    updateEnemies();
+    updateFireballs();
+    updateGold();
+    checkCollisions();
+  } else if (gameState === 'dying') {
+    stateTimer--;
+    if (stateTimer <= 0) {
+      if (lives <= 0) {
+        gameState = 'gameOver';
+        stateTimer = 0;
+        try { SFX.gameOver(); } catch (e) {}
+      } else {
+        // Reload level but keep score
+        loadLevel(level);
+        gameState = 'play';
+      }
+    }
+  } else if (gameState === 'levelComplete') {
+    stateTimer--;
+    if (stateTimer <= 0) {
+      level++;
+      score += 250; // Level completion bonus
+      loadLevel(level);
+      gameState = 'play';
+    }
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, CW, CH);
+
+  if (gameState === 'title') {
+    drawTitleScreen();
+    drawDpad();
+    return;
+  }
+
+  if (gameState === 'gameOver') {
+    drawGameOverScreen();
+    return;
+  }
+
+  // Draw grid
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const t = grid[y][x];
+      if (t === T_DIRT) {
+        drawDirt(x, y);
+      } else if (t === T_EMERALD) {
+        drawDirt(x, y);
+        drawEmerald(x, y);
+      }
+      // T_TUNNEL and T_EMPTY are black (already the background)
+    }
+  }
+
+  // Gold pieces
+  for (const gp of goldPieces) {
+    if (gp.timer < 60 && Math.floor(gp.timer / 6) % 2 === 0) continue; // blink
+    drawGoldPiece(gp);
+  }
+
+  // Gold bags
+  for (const g of goldBags) {
+    // Wobble effect
+    if (g.wobble > 0 && !g.falling) {
+      ctx.save();
+      const wx = Math.sin(g.wobble * 0.5) * 2;
+      ctx.translate(wx, 0);
+      drawGoldBag(g);
+      ctx.restore();
+    } else {
+      drawGoldBag(g);
+    }
+  }
+
+  // Fireballs
+  for (const f of fireballs) {
+    drawFireball(f);
+  }
+
+  // Enemies
+  for (const e of enemies) {
+    if (e.alive) drawEnemy(e);
+  }
+
+  // Player
+  if (gameState !== 'dying' || Math.floor(stateTimer / 4) % 2 === 0) {
+    drawPlayer(player);
+  }
+
+  drawHUD();
+  drawDpad();
+
+  // Level complete overlay
+  if (gameState === 'levelComplete') {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, CW, CH);
+    ctx.fillStyle = C_SCORE;
+    ctx.font = `bold ${Math.floor(TILE * 1.5)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('LEVEL COMPLETE!', CW / 2, CH / 2);
+    ctx.font = `${Math.floor(TILE * 0.7)}px monospace`;
+    ctx.fillStyle = C_TEXT;
+    ctx.fillText('+250 BONUS', CW / 2, CH / 2 + TILE * 1.5);
+  }
+}
+
+function drawTitleScreen() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, CW, CH);
+
+  const cx = CW / 2, cy = CH / 2;
+
+  // Title
+  ctx.fillStyle = C_PLAYER;
+  ctx.font = `bold ${Math.floor(TILE * 2)}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('DIGGER', cx, cy - TILE * 2.5);
+
+  // Subtitle
+  ctx.fillStyle = C_GOLD;
+  ctx.font = `${Math.floor(TILE * 0.6)}px monospace`;
+  ctx.fillText('WINDMILL SOFTWARE 1983', cx, cy - TILE * 1.2);
+
+  // Decorative emeralds
+  for (let i = -2; i <= 2; i++) {
+    const ex = cx + i * TILE * 1.5;
+    const ey = cy;
+    const r = TILE * 0.3;
+    ctx.fillStyle = C_EMERALD;
+    ctx.beginPath();
+    ctx.moveTo(ex, ey - r); ctx.lineTo(ex + r, ey);
+    ctx.lineTo(ex, ey + r); ctx.lineTo(ex - r, ey);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Instructions
+  ctx.fillStyle = C_TEXT;
+  ctx.font = `${Math.floor(TILE * 0.55)}px monospace`;
+  ctx.fillText('ARROWS/SWIPE to move', cx, cy + TILE * 1.5);
+  ctx.fillText('SPACE/FIRE to shoot', cx, cy + TILE * 2.3);
+
+  // Blink
+  if (Math.floor(frameCount / 30) % 2 === 0) {
+    ctx.fillStyle = C_SCORE;
+    ctx.font = `bold ${Math.floor(TILE * 0.7)}px monospace`;
+    ctx.fillText('TAP OR PRESS ENTER', cx, cy + TILE * 3.5);
+  }
+}
+
+function drawGameOverScreen() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, CW, CH);
+
+  ctx.fillStyle = C_PLAYER;
+  ctx.font = `bold ${Math.floor(TILE * 1.8)}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('GAME OVER', CW / 2, CH / 2 - TILE * 1.5);
+
+  ctx.fillStyle = C_SCORE;
+  ctx.font = `bold ${Math.floor(TILE * 1)}px monospace`;
+  ctx.fillText('SCORE: ' + score, CW / 2, CH / 2 + TILE * 0.5);
+
+  ctx.fillStyle = C_TEXT;
+  ctx.font = `${Math.floor(TILE * 0.6)}px monospace`;
+  ctx.fillText('LEVEL ' + level, CW / 2, CH / 2 + TILE * 1.8);
+
+  if (Math.floor(frameCount / 30) % 2 === 0) {
+    ctx.fillStyle = C_SCORE;
+    ctx.font = `bold ${Math.floor(TILE * 0.65)}px monospace`;
+    ctx.fillText('TAP OR PRESS ENTER', CW / 2, CH / 2 + TILE * 3.2);
+  }
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// ── Startup ──
+function boot() {
+  resize();
+  init();
+  gameLoop();
+}
+
+window.addEventListener('resize', () => {
+  resize();
+});
+
+if (window._gameReady) {
+  boot();
+} else {
+  window.addEventListener('gameready', boot);
+}
+</script>
+</body></html>

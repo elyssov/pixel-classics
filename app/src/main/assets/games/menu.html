@@ -33,10 +33,40 @@
   }
   #boot-screen .bios { color: #AAA; }
   #boot-screen .white { color: #FFF; }
-  #boot-screen .highlight { color: #FFFF55; }
-  #boot-screen .sys { color: #55FF55; }
-  #boot-screen .driver { color: #55FFFF; }
+  #boot-screen .highlight { color: #FFF; }
+  #boot-screen .sys { color: #AAA; }
+  #boot-screen .driver { color: #AAA; }
   #boot-screen .prompt { color: #AAA; }
+
+  /* ═══════════════════════════════
+     GAME LOADING SCREEN (in NC)
+     ═══════════════════════════════ */
+  #game-loader {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: #000;
+    color: #AAA;
+    font-family: 'Consolas', 'Courier New', 'Lucida Console', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 16px;
+    white-space: pre;
+    overflow: hidden;
+  }
+  #game-loader .cmd { color: #FFF; }
+  #game-loader .ok { color: #AAA; }
+  #game-loader .title { color: #FFF; }
+  #game-loader .bar-track {
+    display: inline-block;
+    width: 200px;
+    color: #555;
+    letter-spacing: 1px;
+  }
+  #game-loader .bar-fill {
+    color: #FFF;
+  }
   #boot-screen .cursor {
     display: inline-block;
     width: 8px; height: 14px;
@@ -209,17 +239,23 @@
   .nc-fnkey .n { color: #AAAAAA; font-size: 10px; }
   .nc-fnkey .l { color: #000; background: #00AAAA; padding: 0 3px; font-size: 11px; }
 
-  /* Responsive: stack panels on very narrow screens */
-  @media (max-width: 420px) {
-    .nc-panels { flex-direction: column; }
-    .nc-panel:last-child { max-height: 30vh; }
+  /* Portrait warning — NC is landscape only */
+  @media (orientation: portrait) {
+    #nc-screen {
+      /* Force landscape feel even in portrait via transform */
+    }
     .nc-file .fdate { display: none; }
+    .nc-file { font-size: 11px; }
+    .nc-fnkey .l { font-size: 9px; }
   }
 </style>
 </head><body>
 
 <!-- ═══ DOS Boot Screen ═══ -->
 <div id="boot-screen"></div>
+
+<!-- ═══ Game Loading Screen ═══ -->
+<div id="game-loader"></div>
 
 <!-- ═══ Norton Commander ═══ -->
 <div id="nc-screen">
@@ -238,7 +274,7 @@
       <div class="nc-panel-header">C:\GAMES</div>
       <div class="nc-panel-cols"><span>Name</span><span>Size</span><span>Date</span></div>
       <div class="nc-panel-body" id="left-panel"></div>
-      <div class="nc-panel-footer" id="left-footer">GAMES: 8 files, 2,048K</div>
+      <div class="nc-panel-footer" id="left-footer">GAMES: 9 files, 2,048K</div>
     </div>
 
     <!-- Right Panel: C:\ (decorative) -->
@@ -283,6 +319,7 @@ const games = [
   { name: "TETRIS",   ext: "EXE", size: "49,152",  date: "06-06-84", file: "tetris.html" },
   { name: "ARKANOID", ext: "EXE", size: "96,256",  date: "04-17-86", file: "arkanoid.html" },
   { name: "MINESW",   ext: "EXE", size: "24,576",  date: "10-08-90", file: "minesweeper.html" },
+  { name: "DIGGER",   ext: "EXE", size: "72,448",  date: "04-15-83", file: "digger.html" },
 ];
 
 // ═══ C:\ ROOT (decorative) ═══
@@ -306,37 +343,37 @@ const rootFiles = [
 // ═══ DOS BOOT SEQUENCE ═══
 const bootLines = [
   { text: "", delay: 200 },
-  { text: "AMIBIOS (C)1993 American Megatrends Inc.,", cls: "bios", delay: 50 },
-  { text: "BIOS Date: 03/26/26  Ver: 08.00.15", cls: "bios", delay: 50 },
+  { text: "AMIBIOS (C)1993 American Megatrends Inc.,", cls: "white", delay: 50 },
+  { text: "BIOS Date: 09/30/93  Ver: 08.00.15", cls: "bios", delay: 50 },
   { text: "", delay: 100 },
   { text: "Main Processor : Intel 80486DX2-66 MHz", cls: "white", delay: 40 },
   { text: "Numeric Processor : Present", cls: "bios", delay: 30 },
   { text: "Floppy Drive A : 1.44M, 3.5 in.", cls: "bios", delay: 30 },
-  { text: "Hard Disk C: Type 47 — 504 MB", cls: "bios", delay: 30 },
+  { text: "Hard Disk C: Type 47 \u2014 504 MB", cls: "bios", delay: 30 },
   { text: "Base Memory : 640K", cls: "bios", delay: 30 },
   { text: "Extended Memory : 15360K", cls: "bios", delay: 30 },
-  { text: "", delay: 200 },
+  { text: "", delay: 200, action: postBeep },
   { text: "Starting MS-DOS...", cls: "white", delay: 400 },
   { text: "", delay: 150 },
-  { text: "HIMEM.SYS is testing extended memory...done.", cls: "sys", delay: 200 },
-  { text: "DEVICE=C:\\DOS\\HIMEM.SYS", cls: "driver", delay: 100 },
-  { text: "DEVICE=C:\\DOS\\EMM386.EXE NOEMS", cls: "driver", delay: 100 },
-  { text: "DEVICE=C:\\DOS\\SETVER.EXE", cls: "driver", delay: 80 },
+  { text: "HIMEM.SYS is testing extended memory...done.", cls: "bios", delay: 200 },
+  { text: "DEVICE=C:\\DOS\\HIMEM.SYS", cls: "bios", delay: 100 },
+  { text: "DEVICE=C:\\DOS\\EMM386.EXE NOEMS", cls: "bios", delay: 100 },
+  { text: "DEVICE=C:\\DOS\\SETVER.EXE", cls: "bios", delay: 80 },
   { text: "", delay: 100 },
-  { text: "C:\\DOS\\SMARTDRV.EXE /X", cls: "driver", delay: 80 },
+  { text: "C:\\DOS\\SMARTDRV.EXE /X", cls: "bios", delay: 80 },
   { text: "Microsoft SMARTDrive Disk Cache version 5.02", cls: "bios", delay: 60 },
   { text: "  Cache size: 2,097,152 bytes", cls: "bios", delay: 50 },
   { text: "", delay: 100 },
-  { text: "C:\\DOS\\MSCDEX.EXE /D:MSCD001 /L:D", cls: "driver", delay: 80 },
+  { text: "C:\\DOS\\MSCDEX.EXE /D:MSCD001 /L:D", cls: "bios", delay: 80 },
   { text: "MSCDEX Version 2.23  Drive D: = Driver MSCD001", cls: "bios", delay: 60 },
   { text: "", delay: 100 },
-  { text: "C:\\MOUSE\\MOUSE.COM", cls: "driver", delay: 80 },
-  { text: "Mouse driver installed.", cls: "sys", delay: 60 },
+  { text: "C:\\MOUSE\\MOUSE.COM", cls: "bios", delay: 80 },
+  { text: "Mouse driver installed.", cls: "bios", delay: 60 },
   { text: "", delay: 100 },
-  { text: "C:\\>", cls: "prompt", delay: 200 },
-  { text: "C:\\>CD GAMES", cls: "highlight", delay: 300 },
+  { text: "C:\\>", cls: "bios", delay: 200 },
+  { text: "C:\\>CD GAMES", cls: "white", delay: 300 },
   { text: "", delay: 100 },
-  { text: "C:\\GAMES>NC.EXE", cls: "highlight", delay: 400 },
+  { text: "C:\\GAMES>NC.EXE", cls: "white", delay: 400 },
   { text: "", delay: 300 },
 ];
 
@@ -352,6 +389,7 @@ function typeBoot() {
   }
 
   const line = bootLines[bootIndex];
+  if (line.action) line.action();
   const span = document.createElement('span');
   span.className = line.cls || '';
   span.textContent = line.text + '\n';
@@ -419,11 +457,8 @@ function createFileRow(f, cls, clickFile) {
 
   if (clickFile) {
     row.addEventListener('click', () => {
-      // Brief "loading" effect
       row.classList.add('selected');
-      setTimeout(() => {
-        window.location.href = clickFile;
-      }, 150);
+      launchGame(f.name, f.ext, f.size, clickFile);
     });
   }
 
@@ -438,8 +473,108 @@ function updateClock() {
   if (el) el.textContent = h + ':' + m;
 }
 
+// ═══ GAME LAUNCHER ═══
+function launchGame(name, ext, size, file) {
+  const loader = document.getElementById('game-loader');
+  loader.style.display = 'block';
+  loader.innerHTML = '';
+
+  const exeName = name + '.' + ext;
+  const copyright = 19 + (70 + Math.floor(Math.random() * 25));
+
+  const lines = [
+    { text: 'C:\\GAMES>' + exeName, cls: 'cmd', delay: 250 },
+    { text: '', delay: 80 },
+    { text: 'Loading ' + exeName + '...', cls: 'ok', delay: 180 },
+    { text: 'Reading ' + size + ' bytes', cls: 'ok', delay: 120 },
+    { text: '', delay: 60 },
+    { text: 'Initializing graphics mode...', cls: 'ok', delay: 150 },
+    { text: 'VGA 320x200, 256 colors', cls: 'ok', delay: 100 },
+    { text: 'Sound Blaster 16 detected at 220h, IRQ 5, DMA 1', cls: 'ok', delay: 100 },
+    { text: 'Allocating conventional memory... OK', cls: 'ok', delay: 120 },
+    { text: '', delay: 60 },
+    { text: '###PROGRESS###', delay: 0 },
+    { text: '', delay: 80 },
+    { text: name + ' (C) ' + copyright, cls: 'title', delay: 300 },
+    { text: '', delay: 150 },
+  ];
+
+  let idx = 0;
+  const barTotal = 24;
+
+  function typeLoader() {
+    if (idx >= lines.length) {
+      setTimeout(() => { window.location.href = file; }, 200);
+      return;
+    }
+
+    const line = lines[idx];
+
+    // Progress bar — animate it
+    if (line.text === '###PROGRESS###') {
+      idx++;
+      const barLine = document.createElement('span');
+      barLine.textContent = 'Loading: [';
+      const track = document.createElement('span');
+      const barChars = [];
+      for (let b = 0; b < barTotal; b++) barChars.push('\u2591');
+      track.textContent = barChars.join('');
+      const pct = document.createElement('span');
+      pct.textContent = ']   0%';
+      barLine.appendChild(track);
+      barLine.appendChild(pct);
+      loader.appendChild(barLine);
+      loader.appendChild(document.createTextNode('\n'));
+
+      let filled = 0;
+      const barInterval = setInterval(() => {
+        // Random step 1-3 blocks
+        const step = Math.min(1 + Math.floor(Math.random() * 3), barTotal - filled);
+        filled += step;
+        const chars = [];
+        for (let b = 0; b < barTotal; b++) chars.push(b < filled ? '\u2588' : '\u2591');
+        track.textContent = chars.join('');
+        const percent = Math.min(Math.round((filled / barTotal) * 100), 100);
+        pct.textContent = '] ' + String(percent).padStart(3, ' ') + '%';
+
+        if (filled >= barTotal) {
+          clearInterval(barInterval);
+          setTimeout(typeLoader, 150);
+        }
+      }, 40 + Math.floor(Math.random() * 60));
+      return;
+    }
+
+    const span = document.createElement('span');
+    span.className = line.cls || '';
+    span.textContent = line.text + '\n';
+    loader.appendChild(span);
+    idx++;
+    setTimeout(typeLoader, line.delay);
+  }
+
+  setTimeout(typeLoader, 100);
+}
+
+// ═══ POST BEEP ═══
+function postBeep() {
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+    o.type = 'square';
+    o.frequency.value = 1000;
+    g.gain.value = 0.08;
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.15);
+    o.connect(g);
+    g.connect(ac.destination);
+    o.start(ac.currentTime);
+    o.stop(ac.currentTime + 0.15);
+  } catch(e) {}
+}
+
 // ═══ START BOOT ═══
-// Small delay to feel like real boot
+// Small delay to feel like real boot — beep after memory test
 setTimeout(typeBoot, 300);
 </script>
 </body></html>

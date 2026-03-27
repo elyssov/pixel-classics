@@ -25,15 +25,15 @@
   const fileSizeEnd = String(Math.floor(Math.random() * 999)).padStart(3, '0');
 
   const lines = [
-    { text: `C:\\GAMES>${exeName}`, cls: '#FFFF55', delay: 300 },
+    { text: `C:\\GAMES>${exeName}`, cls: '#FFF', delay: 300 },
     { text: '', delay: 100 },
-    { text: `Loading ${exeName}...`, cls: '#55FF55', delay: 200 },
+    { text: `Loading ${exeName}...`, cls: '#AAA', delay: 200 },
     { text: `Reading ${fileSize}${fileSizeEnd} bytes`, cls: '#AAA', delay: 150 },
-    { text: 'Initializing graphics...', cls: '#55FFFF', delay: 200 },
+    { text: 'Initializing graphics...', cls: '#AAA', delay: 200 },
     { text: 'Sound Blaster 16 detected at 220h, IRQ 5, DMA 1', cls: '#AAA', delay: 100 },
-    { text: 'Allocating conventional memory... OK', cls: '#55FF55', delay: 150 },
+    { text: 'Allocating conventional memory... OK', cls: '#AAA', delay: 150 },
     { text: '', delay: 100 },
-    { text: `${gameName} (c) 19${70 + Math.floor(Math.random() * 25)}`, cls: '#FFFF55', delay: 200 },
+    { text: `${gameName} (c) 19${70 + Math.floor(Math.random() * 25)}`, cls: '#FFF', delay: 200 },
     { text: '', delay: 200 },
   ];
 

@@ -1,0 +1,110 @@
+name: Build Pixel Classics APK
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build-aar:
+    name: Build Go mesh core (.aar)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone Iskra (mesh dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: elyssov/iskra
+          path: iskra-src
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install gomobile
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20250305212854-3a7bc9f8a4de
+          go install golang.org/x/mobile/cmd/gobind@v0.0.0-20250305212854-3a7bc9f8a4de
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager "ndk;26.1.10909125"
+
+      - name: Fix go.mod replace path
+        run: |
+          cd core
+          # Replace Windows local path with CI-relative path
+          sed -i 's|replace github.com/iskra-messenger/iskra => .*|replace github.com/iskra-messenger/iskra => ../iskra-src|' go.mod
+          cat go.mod
+          go mod tidy
+
+      - name: Build .aar
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
+          export CGO_LDFLAGS="-Wl,-z,max-page-size=16384"
+          gomobile init
+          mkdir -p app/libs
+          gomobile bind -v -target=android/arm64,android/arm -androidapi 24 \
+            -o app/libs/core.aar \
+            ./core/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-aar
+          path: app/libs/core.aar
+
+  build-apk:
+    name: Build APK
+    needs: build-aar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: core-aar
+          path: app/libs/
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.4'
+
+      - name: Generate keystore
+        run: |
+          keytool -genkey -v -keystore app/pixel-classics-release.jks \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias pixelclassics \
+            -storepass pixelclassics2026 \
+            -keypass pixelclassics2026 \
+            -dname "CN=Pixel Classics, O=Pixel, L=Moscow, C=RU"
+
+      - name: Build signed APK
+        env:
+          KEYSTORE_PASSWORD: pixelclassics2026
+          KEY_ALIAS: pixelclassics
+          KEY_PASSWORD: pixelclassics2026
+        run: |
+          cd $GITHUB_WORKSPACE
+          gradle -p . assembleRelease
+
+      - name: Rename APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/*.apk dist/pixel-classics-v1.apk 2>/dev/null || true
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pixel-classics-apk
+          path: dist/pixel-classics-v1.apk
