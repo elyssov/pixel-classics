@@ -73,7 +73,7 @@ class MainActivity : AppCompatActivity() {
             settings.setGeolocationEnabled(false)
 
             // Enable hardware acceleration
-            setLayerType(LAYER_TYPE_HARDWARE, null)
+            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
 
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(
