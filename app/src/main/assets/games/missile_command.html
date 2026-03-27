@@ -40,6 +40,60 @@ const EXPLOSION_OUTER = '#FF2200';
 let cities, batteries, missiles, rockets, explosions, particles;
 let score, level, gameOver, waveActive, waveTimer, missilesThisWave, missilesLaunched;
 
+// ── Air Raid Siren (ambient, toggleable) ──
+let sirenEnabled = true;
+let sirenCtx = null;
+let sirenNode = null;
+
+function startSiren() {
+  if (!sirenEnabled || sirenNode) return;
+  try {
+    if (!sirenCtx) sirenCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = sirenCtx.createOscillator();
+    const gain = sirenCtx.createGain();
+    const lfo = sirenCtx.createOscillator();
+    const lfoGain = sirenCtx.createGain();
+
+    // Slow rising/falling siren: LFO modulates frequency
+    osc.type = 'sine';
+    osc.frequency.value = 420;
+    lfo.type = 'triangle';
+    lfo.frequency.value = 0.4; // one cycle per 2.5 seconds
+    lfoGain.gain.value = 180;  // sweep 240-600 Hz
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+    osc.connect(gain);
+    gain.gain.value = 0.025; // very quiet
+    gain.connect(sirenCtx.destination);
+
+    osc.start();
+    lfo.start();
+    sirenNode = { osc, lfo, gain };
+  } catch(e) {}
+}
+
+function stopSiren() {
+  if (sirenNode) {
+    try { sirenNode.osc.stop(); sirenNode.lfo.stop(); } catch(e) {}
+    sirenNode = null;
+  }
+}
+
+function updateSirenVolume() {
+  if (!sirenNode || !sirenEnabled) return;
+  // Louder when missiles are close to cities
+  const h = H();
+  let threat = 0;
+  for (const m of missiles) {
+    const closeness = m.y / (h - 35);
+    if (closeness > 0.5) threat = Math.max(threat, closeness);
+  }
+  // Volume scales with threat: 0.01 (distant) to 0.06 (close)
+  const vol = 0.01 + threat * 0.05;
+  try { sirenNode.gain.gain.setTargetAtTime(vol, sirenCtx.currentTime, 0.3); } catch(e) {}
+}
+
 function init() {
   const w = W(), h = H();
 
@@ -168,8 +222,10 @@ function update() {
       waveTimer = 0;
       spawnMissile();
       missilesLaunched++;
+      if (sirenEnabled && !sirenNode) startSiren();
     }
   }
+  updateSirenVolume();
 
   // Update enemy missiles
   for (let i = missiles.length - 1; i >= 0; i--) {
@@ -221,7 +277,7 @@ function update() {
       addExplosion(m.x, H() - 35, 30, '#FF2200');
       missiles.splice(i, 1);
 
-      if (!cities.some(c => c.alive)) gameOver = true;
+      if (!cities.some(c => c.alive)) { gameOver = true; stopSiren(); }
       continue;
     }
 
@@ -318,6 +374,7 @@ function update() {
 
   // Wave end check
   if (missilesLaunched >= missilesThisWave && missiles.length === 0 && !gameOver) {
+    stopSiren();
     // Next wave
     level++;
     missilesThisWave = 8 + level * 4;
