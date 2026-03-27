@@ -378,7 +378,7 @@
 
   <!-- Status -->
   <div class="nc-status">
-    <span>C:\GAMES\</span>
+    <span>C:\GAMES\ v1.0</span>
     <span><span class="sync">&#9679;</span> Score sync &mdash; 0 nearby</span>
     <span id="nc-clock"></span>
   </div>
@@ -566,6 +566,72 @@ function updateClock() {
   const el = document.getElementById('nc-clock');
   if (el) el.textContent = h + ':' + m;
 }
+
+// ═══ FOTA — Over-the-Air Update from GitHub Releases ═══
+const CURRENT_VERSION = '1.0.0';
+const CURRENT_BUILD = 3;
+const GITHUB_REPO = 'elyssov/pixel-classics';
+
+function checkForUpdate() {
+  const dismissed = localStorage.getItem('pc_update_dismissed');
+  if (dismissed === String(CURRENT_BUILD)) return; // already dismissed this version
+
+  fetch('https://api.github.com/repos/' + GITHUB_REPO + '/releases/latest', {
+    cache: 'no-cache'
+  })
+  .then(r => r.json())
+  .then(release => {
+    if (!release.tag_name) return;
+    const remoteVer = release.tag_name.replace(/^v/, '');
+
+    // Find APK asset
+    let apkUrl = null, apkSize = 0;
+    for (const a of (release.assets || [])) {
+      if (a.name.endsWith('.apk')) {
+        apkUrl = a.browser_download_url;
+        apkSize = a.size;
+        break;
+      }
+    }
+
+    // Extract build number from version or compare strings
+    if (remoteVer !== CURRENT_VERSION && apkUrl) {
+      showUpdateBanner(remoteVer, apkUrl, Math.round(apkSize / 1048576));
+    }
+  })
+  .catch(() => {}); // silently fail if no internet
+}
+
+function showUpdateBanner(version, url, sizeMB) {
+  // Create NC-style update bar above status
+  let bar = document.getElementById('update-bar');
+  if (bar) bar.remove();
+  bar = document.createElement('div');
+  bar.id = 'update-bar';
+  bar.style.cssText = 'background:#000;color:#55FF55;padding:4px 8px;font-size:11px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;flex-shrink:0;';
+  bar.innerHTML = '<span>\u2191 Update available: v' + version + ' (' + sizeMB + ' MB)</span>' +
+    '<span style="display:flex;gap:8px;">' +
+    '<span id="update-install" style="color:#FFFF55;cursor:pointer;">[Install]</span>' +
+    '<span id="update-dismiss" style="color:#AA0000;cursor:pointer;">[Later]</span>' +
+    '</span>';
+
+  const nc = document.getElementById('nc-screen');
+  const fnbar = nc.querySelector('.nc-fnbar');
+  nc.insertBefore(bar, fnbar);
+
+  document.getElementById('update-install').addEventListener('click', (e) => {
+    e.stopPropagation();
+    window.open(url, '_blank');
+  });
+  document.getElementById('update-dismiss').addEventListener('click', (e) => {
+    e.stopPropagation();
+    localStorage.setItem('pc_update_dismissed', String(CURRENT_BUILD));
+    bar.remove();
+  });
+}
+
+// Check for updates 3 seconds after NC loads
+setTimeout(checkForUpdate, 3000);
 
 // ═══ GAME LAUNCHER ═══
 function launchGame(name, ext, size, file) {
