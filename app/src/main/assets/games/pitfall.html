@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Pitfall!</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #000; overflow: hidden; touch-action: none; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head><body>
+<canvas id="c"></canvas>
+<script src="sound.js"></script>
+<script src="loader.js"></script>
+<script>
+'use strict';
+
+// ==================== PITFALL! NES-STYLE REMAKE ====================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// --- NES Color Palette (subset of the 54-color NES palette) ---
+const PAL = {
+  black:       '#0F0F0F',
+  darkGray:    '#3F3F3F',
+  gray:        '#7F7F7F',
+  lightGray:   '#BCBCBC',
+  white:       '#FCFCFC',
+  // Greens
+  darkGreen:   '#005800',
+  green:       '#008000',
+  brightGreen: '#00A800',
+  lightGreen:  '#00D800',
+  paleGreen:   '#B8F8B8',
+  limeGreen:   '#58F898',
+  // Blues
+  darkBlue:    '#000088',
+  blue:        '#0058F8',
+  skyBlue:     '#3CBCFC',
+  lightBlue:   '#6888FC',
+  paleBlue:    '#A4E4FC',
+  // Browns
+  darkBrown:   '#503000',
+  brown:       '#784800',
+  medBrown:    '#AC7C00',
+  tan:         '#C89438',
+  lightTan:    '#F8B878',
+  // Reds
+  darkRed:     '#A80000',
+  red:         '#F83800',
+  brightRed:   '#FC7460',
+  // Yellows
+  gold:        '#F8B800',
+  yellow:      '#F8D878',
+  brightYellow:'#FCFC00',
+  // Others
+  orange:      '#F87858',
+  peach:       '#FCBCB0',
+  purple:      '#6844FC',
+  pink:        '#F878F8',
+  teal:        '#008888',
+  cyan:        '#00E8D8',
+};
+
+// --- Constants ---
+const W = 480, H = 270; // NES widescreen (16:9 at 480p)
+const TILE = 16;
+const GRAVITY = 0.55;
+const JUMP_FORCE = -8.5;
+const RUN_SPEED = 2.5;
+const VINE_SWING_SPEED = 0.035;
+const TOTAL_SCREENS = 255;
+const GAME_TIME = 20 * 60; // 20 minutes in seconds
+const UNDERGROUND_Y = H * 0.6;
+
+// Screen types
+const SCR_NORMAL = 0, SCR_WATER = 1, SCR_TAR = 2, SCR_CROC = 3, SCR_QUICKSAND = 4;
+
+// --- Game State ---
+let gameState = 'title'; // title, playing, gameover
+let score, lives, timeLeft, timerInterval;
+let harry, camera;
+let currentScreen, screenData;
+let particles = [];
+let screenCache = {};
+let frameCount = 0;
+
+// --- Procedural Screen Generation (seeded like the original) ---
+function seededRandom(seed) {
+  let s = seed % 2147483647;
+  if (s <= 0) s += 2147483646;
+  return () => {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+function generateScreen(index) {
+  if (screenCache[index]) return screenCache[index];
+  const rng = seededRandom(index * 7919 + 1301);
+
+  const type = (() => {
+    const r = rng();
+    if (r < 0.2) return SCR_WATER;
+    if (r < 0.35) return SCR_TAR;
+    if (r < 0.5) return SCR_CROC;
+    if (r < 0.6) return SCR_QUICKSAND;
+    return SCR_NORMAL;
+  })();
+
+  // Ground holes
+  const hasHole = rng() < 0.4;
+  const holeX = Math.floor(rng() * 200) + 140;
+  const holeW = type === SCR_CROC ? 96 : (type === SCR_WATER || type === SCR_TAR || type === SCR_QUICKSAND ? 80 : 64);
+
+  // Vine
+  const hasVine = rng() < 0.45 && hasHole;
+  const vineX = hasHole ? holeX + holeW / 2 : Math.floor(rng() * 300) + 90;
+
+  // Collectible
+  const hasCollectible = rng() < 0.35;
+  const collectibleType = (() => {
+    const r = rng();
+    if (r < 0.3) return 'gold';
+    if (r < 0.55) return 'silver';
+    if (r < 0.75) return 'ring';
+    return 'money';
+  })();
+  const collectibleX = Math.floor(rng() * 280) + 100;
+  const collectibleY = hasVine ? 60 : H * 0.48 - 28;
+  let collectibleTaken = false;
+
+  // Hazards
+  const hazards = [];
+  // Rolling logs
+  if (rng() < 0.3 && type === SCR_NORMAL) {
+    hazards.push({
+      type: 'log',
+      x: Math.floor(rng() * 200) + 140,
+      y: H * 0.48 - 14,
+      vx: (rng() < 0.5 ? -1 : 1) * (1 + rng() * 1.2),
+      w: 20, h: 12
+    });
+  }
+  // Scorpions
+  if (rng() < 0.3) {
+    hazards.push({
+      type: 'scorpion',
+      x: Math.floor(rng() * 200) + 150,
+      y: H * 0.48 - 10,
+      vx: (rng() < 0.5 ? -1 : 1) * 0.8,
+      w: 16, h: 10
+    });
+  }
+  // Rattlesnake
+  if (rng() < 0.2 && type === SCR_NORMAL) {
+    hazards.push({
+      type: 'snake',
+      x: Math.floor(rng() * 200) + 140,
+      y: H * 0.48 - 8,
+      w: 20, h: 8,
+      vx: 0
+    });
+  }
+  // Fire
+  if (rng() < 0.15) {
+    hazards.push({
+      type: 'fire',
+      x: Math.floor(rng() * 200) + 140,
+      y: H * 0.48 - 16,
+      w: 12, h: 16,
+      vx: 0
+    });
+  }
+  // Crocodiles in croc pits
+  const crocs = [];
+  if (type === SCR_CROC && hasHole) {
+    const numCrocs = 2 + Math.floor(rng() * 2);
+    for (let i = 0; i < numCrocs; i++) {
+      crocs.push({
+        x: holeX + i * 32,
+        y: H * 0.48 + 8,
+        w: 30, h: 12,
+        mouthOpen: false,
+        mouthTimer: rng() * 200,
+        mouthPhase: rng() * Math.PI * 2
+      });
+    }
+  }
+
+  // Ladder to underground
+  const hasLadder = rng() < 0.35;
+  const ladderX = Math.floor(rng() * 200) + 120;
+
+  // Underground hazards
+  const underHazards = [];
+  if (hasLadder) {
+    if (rng() < 0.5) {
+      underHazards.push({
+        type: 'scorpion',
+        x: Math.floor(rng() * 250) + 100,
+        y: H * 0.85 - 10,
+        vx: (rng() < 0.5 ? -1 : 1) * 0.6,
+        w: 16, h: 10
+      });
+    }
+    // Dead end wall
+    if (rng() < 0.3) {
+      underHazards.push({
+        type: 'wall',
+        x: Math.floor(rng() * 150) + 250,
+        y: H * 0.68,
+        w: 16, h: H * 0.17
+      });
+    }
+  }
+
+  const data = {
+    index, type, hasHole, holeX, holeW,
+    hasVine, vineX,
+    hasCollectible, collectibleType, collectibleX, collectibleY, collectibleTaken,
+    hazards, crocs,
+    hasLadder, ladderX,
+    underHazards,
+    bgSeed: rng() * 10000
+  };
+  screenCache[index] = data;
+  return data;
+}
+
+// --- Harry (Player) ---
+function createHarry() {
+  return {
+    x: 80, y: H * 0.48 - 24,
+    vx: 0, vy: 0,
+    w: 14, h: 22,
+    onGround: false,
+    isJumping: false,
+    isSwinging: false,
+    vineAngle: 0,
+    vineDir: 1,
+    vineAnchorX: 0,
+    vineAnchorY: 0,
+    vineLength: 0,
+    facing: 1, // 1=right, -1=left
+    animFrame: 0,
+    animTimer: 0,
+    isUnderground: false,
+    isDead: false,
+    deathTimer: 0,
+    invincible: 0,
+    runInput: 0, // -1, 0, 1
+    jumpInput: false,
+  };
+}
+
+// --- Camera ---
+function createCamera() {
+  return { x: 0, y: 0, targetX: 0, shake: 0 };
+}
+
+// --- Input ---
+const keys = {};
+let touchLeft = false, touchRight = false, touchJump = false;
+let touchStartX = 0, touchStartY = 0;
+let swipeUp = false, swipeDown = false;
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  e.preventDefault();
+});
+document.addEventListener('keyup', e => {
+  keys[e.code] = false;
+  e.preventDefault();
+});
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const rect = canvas.getBoundingClientRect();
+    const tx = (t.clientX - rect.left) / rect.width;
+    const ty = (t.clientY - rect.top) / rect.height;
+    touchStartX = tx; touchStartY = ty;
+    if (gameState === 'title' || gameState === 'gameover') {
+      if (gameState === 'title') startGame();
+      else { gameState = 'title'; }
+      return;
+    }
+    if (tx < 0.35) touchLeft = true;
+    else if (tx > 0.65) touchRight = true;
+    if (ty < 0.45) touchJump = true;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const rect = canvas.getBoundingClientRect();
+    const tx = (t.clientX - rect.left) / rect.width;
+    const ty = (t.clientY - rect.top) / rect.height;
+    // Detect swipes
+    const dy = ty - touchStartY;
+    const dx = tx - touchStartX;
+    if (dy < -0.08 && Math.abs(dx) < 0.1) swipeUp = true;
+    if (dy > 0.08 && Math.abs(dx) < 0.1) swipeDown = true;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  touchLeft = false; touchRight = false; touchJump = false;
+});
+
+canvas.addEventListener('mousedown', e => {
+  if (gameState === 'title') { startGame(); return; }
+  if (gameState === 'gameover') { gameState = 'title'; return; }
+});
+
+// --- Pixel Art Drawing Helpers ---
+function drawPixelRect(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.floor(x), Math.floor(y), w, h);
+}
+
+function drawPixels(x, y, data, palette, scale) {
+  scale = scale || 1;
+  for (let row = 0; row < data.length; row++) {
+    for (let col = 0; col < data[row].length; col++) {
+      const c = data[row][col];
+      if (c !== ' ' && palette[c]) {
+        ctx.fillStyle = palette[c];
+        ctx.fillRect(Math.floor(x + col * scale), Math.floor(y + row * scale), scale, scale);
+      }
+    }
+  }
+}
+
+// --- Sprite Data (pixel art) ---
+const HARRY_PALETTE = {
+  'H': PAL.tan,        // hat
+  'h': PAL.brown,      // hat band
+  'S': PAL.peach,      // skin
+  'B': PAL.blue,       // shirt
+  'b': PAL.darkBlue,   // shirt shadow
+  'P': PAL.darkBrown,  // pants
+  'p': PAL.brown,      // pants highlight
+  'K': PAL.black,      // boots
+  'E': PAL.black,      // eyes
+  'W': PAL.white,      // eye whites
+};
+
+const HARRY_STAND = [
+  '  HHH  ',
+  ' HhhhH ',
+  ' HSSSH ',
+  '  WEWS ',
+  '  SSS  ',
+  ' BBBBB ',
+  ' BbBbB ',
+  ' BBBBB ',
+  '  BBB  ',
+  ' PPPPP ',
+  ' PP PP ',
+  ' PP PP ',
+  ' KK KK ',
+  ' KK KK ',
+];
+
+const HARRY_RUN = [
+  [
+    '  HHH  ',
+    ' HhhhH ',
+    ' HSSSH ',
+    '  WEWS ',
+    '  SSS  ',
+    ' BBBBB ',
+    ' BbBbB ',
+    ' BBBBB ',
+    '  BBB  ',
+    '  PPPP ',
+    ' PP PP ',
+    'PP   PP',
+    'KK   KK',
+    '       ',
+  ],
+  [
+    '  HHH  ',
+    ' HhhhH ',
+    ' HSSSH ',
+    '  WEWS ',
+    '  SSS  ',
+    ' BBBBB ',
+    ' BbBbB ',
+    ' BBBBB ',
+    '  BBB  ',
+    ' PPPPP ',
+    '  PP PP',
+    '  PP PP',
+    '  KK KK',
+    '       ',
+  ],
+  [
+    '  HHH  ',
+    ' HhhhH ',
+    ' HSSSH ',
+    '  WEWS ',
+    '  SSS  ',
+    ' BBBBB ',
+    ' BbBbB ',
+    ' BBBBB ',
+    '  BBB  ',
+    ' PPPP  ',
+    'PP PP  ',
+    'PP  PP ',
+    'KK  KK ',
+    '       ',
+  ],
+  [
+    '  HHH  ',
+    ' HhhhH ',
+    ' HSSSH ',
+    '  WEWS ',
+    '  SSS  ',
+    ' BBBBB ',
+    ' BbBbB ',
+    ' BBBBB ',
+    '  BBB  ',
+    ' PPPPP ',
+    'PP PP  ',
+    'PP PP  ',
+    'KK KK  ',
+    '       ',
+  ],
+];
+
+const HARRY_JUMP = [
+  '  HHH  ',
+  ' HhhhH ',
+  ' HSSSH ',
+  '  WEWS ',
+  '  SSS  ',
+  'SBBBBBS',
+  ' BbBbB ',
+  ' BBBBB ',
+  '  BBB  ',
+  '  PPP  ',
+  ' PP PP ',
+  'PP   PP',
+  'KK   KK',
+  '       ',
+];
+
+const HARRY_SWING = [
+  '  HHH  ',
+  ' HhhhH ',
+  ' HSSSH ',
+  '  WEWS ',
+  '  SSS  ',
+  'SBBBBBS',
+  ' BbBbB ',
+  ' BBBBB ',
+  '  BBB  ',
+  '  PPP  ',
+  '  PPP  ',
+  '  PPP  ',
+  '  KKK  ',
+  '  KKK  ',
+];
+
+const CROC_PALETTE = {
+  'G': PAL.darkGreen,
+  'g': PAL.green,
+  'L': PAL.brightGreen,
+  'E': PAL.red,
+  'W': PAL.white,
+  'T': PAL.white,
+  'M': PAL.darkRed,
+};
+
+const CROC_CLOSED = [
+  '          GG',
+  '  GGGGGGGGGG',
+  ' gGLLLLLLgEG',
+  'gGLLLLLLLLGG',
+  'GGTTTTTTTTTG',
+  ' GGGGGGGGGGG',
+  '  gGGGGGGGg ',
+  '  g  g  g  g',
+];
+
+const CROC_OPEN = [
+  '          GG',
+  '  GGGGGGGGGG',
+  ' gGLLLLLLgEG',
+  'gGLLLLLLLLGG',
+  '          MM',
+  'GGTTTTTTTTTG',
+  ' GGGGGGGGGGG',
+  '  g  g  g  g',
+];
+
+const SCORPION_PALETTE = {
+  'R': PAL.darkRed,
+  'r': PAL.red,
+  'B': PAL.black,
+  'Y': PAL.gold,
+};
+
+const SCORPION_SPRITE = [
+  '      Rr',
+  'R    Rr ',
+  ' R  Rr  ',
+  '  RRr   ',
+  ' rRRRr  ',
+  'rRBRBRr ',
+  'rRRRRRYr',
+  ' r   r  ',
+];
+
+const SNAKE_PALETTE = {
+  'G': PAL.darkGreen,
+  'g': PAL.green,
+  'Y': PAL.gold,
+  'R': PAL.red,
+  'E': PAL.red,
+};
+
+const SNAKE_SPRITE = [
+  '  gG    ',
+  ' gGGg RE',
+  'gGGGGgGG',
+  'GG  GGGG',
+  '    GG  ',
+  '   GYG  ',
+];
+
+// --- Background Drawing ---
+function drawParallaxBG(scrollX, underground) {
+  if (underground) {
+    // Underground stone background
+    ctx.fillStyle = PAL.darkBrown;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stone wall pattern
+    for (let y = 0; y < H; y += 16) {
+      for (let x = 0; x < W; x += 24) {
+        const ox = (y % 32 === 0) ? 0 : 12;
+        ctx.fillStyle = PAL.brown;
+        ctx.fillRect(x + ox, y, 22, 14);
+        ctx.fillStyle = '#604020';
+        ctx.fillRect(x + ox + 1, y + 1, 20, 12);
+        ctx.fillStyle = '#705030';
+        ctx.fillRect(x + ox + 2, y + 2, 18, 10);
+      }
+    }
+
+    // Animated water at the bottom
+    const waterY = H * 0.88;
+    ctx.fillStyle = PAL.darkBlue;
+    ctx.fillRect(0, waterY, W, H - waterY);
+    for (let x = 0; x < W; x += 4) {
+      const wave = Math.sin((x + frameCount * 2) * 0.08) * 2;
+      ctx.fillStyle = (frameCount + x) % 12 < 6 ? PAL.blue : PAL.skyBlue;
+      ctx.fillRect(x, waterY + wave, 4, 2);
+    }
+    return;
+  }
+
+  // --- Layer 1: Sky gradient ---
+  const grad = ctx.createLinearGradient(0, 0, 0, H * 0.5);
+  grad.addColorStop(0, PAL.skyBlue);
+  grad.addColorStop(0.5, PAL.paleBlue);
+  grad.addColorStop(1, PAL.paleGreen);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // --- Layer 2: Distant mountains (slow parallax) ---
+  const mtnScroll = scrollX * 0.1;
+  ctx.fillStyle = '#5878A8';
+  for (let i = -1; i < 6; i++) {
+    const mx = i * 120 - (mtnScroll % 120);
+    const mh = 35 + Math.sin(i * 2.7) * 15;
+    // Triangle mountain
+    ctx.beginPath();
+    ctx.moveTo(mx, H * 0.35);
+    ctx.lineTo(mx + 60, H * 0.35 - mh);
+    ctx.lineTo(mx + 120, H * 0.35);
+    ctx.fill();
+  }
+  // Snow caps
+  ctx.fillStyle = PAL.white;
+  for (let i = -1; i < 6; i++) {
+    const mx = i * 120 - (mtnScroll % 120);
+    const mh = 35 + Math.sin(i * 2.7) * 15;
+    ctx.beginPath();
+    ctx.moveTo(mx + 48, H * 0.35 - mh + 5);
+    ctx.lineTo(mx + 60, H * 0.35 - mh);
+    ctx.lineTo(mx + 72, H * 0.35 - mh + 5);
+    ctx.fill();
+  }
+
+  // --- Layer 3: Mid trees (medium parallax) ---
+  const treeScroll = scrollX * 0.3;
+  for (let i = -1; i < 10; i++) {
+    const tx = i * 64 - (treeScroll % 64);
+    const th = 50 + Math.sin(i * 1.9 + 3) * 15;
+    // Tree trunk
+    ctx.fillStyle = PAL.darkBrown;
+    ctx.fillRect(tx + 28, H * 0.38, 8, th * 0.6);
+    // Canopy layers (darker behind)
+    ctx.fillStyle = '#206020';
+    drawTreeCanopy(tx + 32, H * 0.38 - 5, 28 + (i % 3) * 4);
+    ctx.fillStyle = PAL.darkGreen;
+    drawTreeCanopy(tx + 32, H * 0.38 - 2, 22 + (i % 2) * 4);
+  }
+
+  // --- Layer 4: Near foliage (fast parallax) ---
+  const nearScroll = scrollX * 0.6;
+  ctx.fillStyle = PAL.green;
+  for (let i = -1; i < 14; i++) {
+    const fx = i * 40 - (nearScroll % 40);
+    const fh = 12 + Math.sin(i * 3.3) * 5;
+    drawBush(fx, H * 0.42, 35, fh);
+  }
+
+  // Ground
+  ctx.fillStyle = PAL.brightGreen;
+  ctx.fillRect(0, H * 0.48, W, 4);
+  ctx.fillStyle = PAL.darkBrown;
+  ctx.fillRect(0, H * 0.48 + 4, W, H * 0.52);
+  ctx.fillStyle = PAL.brown;
+  ctx.fillRect(0, H * 0.48 + 4, W, 8);
+
+  // Dirt texture
+  const dirtRng = seededRandom(Math.floor(scrollX / 100) + 777);
+  for (let i = 0; i < 30; i++) {
+    const dx = dirtRng() * W;
+    const dy = H * 0.5 + dirtRng() * (H * 0.3);
+    ctx.fillStyle = dirtRng() < 0.5 ? '#604020' : '#806040';
+    ctx.fillRect(dx, dy, 2 + dirtRng() * 3, 1 + dirtRng() * 2);
+  }
+}
+
+function drawTreeCanopy(cx, cy, r) {
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.5, cy + 5, r * 0.7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + r * 0.5, cy + 5, r * 0.7, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawBush(x, y, w, h) {
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y, w / 2, Math.PI, 0);
+  ctx.fill();
+  ctx.fillRect(x, y - h / 3, w, h / 2);
+}
+
+// --- Draw Screen Elements ---
+function drawScreenElements(scr, scrollX) {
+  const ox = scr.index * W - scrollX;
+
+  // Hole in ground
+  if (scr.hasHole) {
+    const hx = ox + scr.holeX;
+    // Clear the ground for hole
+    ctx.fillStyle = PAL.black;
+    ctx.fillRect(hx, H * 0.48, scr.holeW, 30);
+
+    // Pit fill based on type
+    if (scr.type === SCR_WATER) {
+      ctx.fillStyle = PAL.darkBlue;
+      ctx.fillRect(hx, H * 0.48 + 15, scr.holeW, 15);
+      // Animated water surface
+      for (let wx = 0; wx < scr.holeW; wx += 3) {
+        const wy = Math.sin((wx + hx + frameCount * 1.5) * 0.12) * 2;
+        ctx.fillStyle = frameCount % 8 < 4 ? PAL.blue : PAL.skyBlue;
+        ctx.fillRect(hx + wx, H * 0.48 + 14 + wy, 3, 2);
+      }
+    } else if (scr.type === SCR_TAR) {
+      ctx.fillStyle = '#202020';
+      ctx.fillRect(hx, H * 0.48 + 10, scr.holeW, 20);
+      // Tar bubbles
+      if (frameCount % 60 < 15) {
+        ctx.fillStyle = '#404040';
+        ctx.beginPath();
+        ctx.arc(hx + scr.holeW * 0.3, H * 0.48 + 18, 3 + Math.sin(frameCount * 0.1), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (frameCount % 80 < 20) {
+        ctx.fillStyle = '#383838';
+        ctx.beginPath();
+        ctx.arc(hx + scr.holeW * 0.7, H * 0.48 + 20, 2 + Math.sin(frameCount * 0.15), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (scr.type === SCR_QUICKSAND) {
+      ctx.fillStyle = PAL.tan;
+      ctx.fillRect(hx, H * 0.48 + 10, scr.holeW, 20);
+      // Quicksand shimmer
+      for (let qx = 0; qx < scr.holeW; qx += 6) {
+        const qy = Math.sin((qx + frameCount * 0.5) * 0.2) * 1;
+        ctx.fillStyle = PAL.lightTan;
+        ctx.fillRect(hx + qx, H * 0.48 + 13 + qy, 4, 1);
+      }
+    }
+
+    // Hole edges
+    ctx.fillStyle = PAL.darkBrown;
+    ctx.fillRect(hx - 2, H * 0.48, 2, 30);
+    ctx.fillRect(hx + scr.holeW, H * 0.48, 2, 30);
+  }
+
+  // Crocodiles
+  for (const croc of scr.crocs) {
+    const cx = ox + croc.x;
+    const isOpen = Math.sin(frameCount * 0.04 + croc.mouthPhase) > 0.3;
+    croc.mouthOpen = isOpen;
+    drawPixels(cx, croc.y, isOpen ? CROC_OPEN : CROC_CLOSED, CROC_PALETTE, 2);
+  }
+
+  // Vine
+  if (scr.hasVine) {
+    const vx = ox + scr.vineX;
+    const vineTop = 10;
+    const vineBot = H * 0.35;
+    // Vine rope
+    ctx.strokeStyle = PAL.darkGreen;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(vx, vineTop);
+    // Slight curve
+    const sway = Math.sin(frameCount * 0.02) * 5;
+    ctx.quadraticCurveTo(vx + sway, (vineTop + vineBot) / 2, vx + sway * 0.5, vineBot);
+    ctx.stroke();
+    // Vine leaves
+    ctx.fillStyle = PAL.brightGreen;
+    for (let ly = vineTop + 15; ly < vineBot - 10; ly += 18) {
+      const lsway = Math.sin(frameCount * 0.02) * (ly / vineBot) * 5;
+      ctx.fillRect(vx + lsway - 4, ly, 3, 5);
+      ctx.fillRect(vx + lsway + 3, ly + 8, 3, 5);
+    }
+  }
+
+  // Ladder
+  if (scr.hasLadder) {
+    const lx = ox + scr.ladderX;
+    const ly = H * 0.48;
+    // Ladder rails
+    ctx.fillStyle = PAL.lightTan;
+    ctx.fillRect(lx, ly, 3, 50);
+    ctx.fillRect(lx + 14, ly, 3, 50);
+    // Rungs
+    for (let r = 0; r < 5; r++) {
+      ctx.fillStyle = PAL.tan;
+      ctx.fillRect(lx + 3, ly + 5 + r * 10, 11, 2);
+    }
+    // Indicator arrow (blinking)
+    if (frameCount % 40 < 25) {
+      ctx.fillStyle = PAL.brightYellow;
+      ctx.beginPath();
+      ctx.moveTo(lx + 8, ly + 52);
+      ctx.lineTo(lx + 2, ly + 46);
+      ctx.lineTo(lx + 14, ly + 46);
+      ctx.fill();
+    }
+  }
+
+  // Collectible
+  if (scr.hasCollectible && !scr.collectibleTaken) {
+    const cx = ox + scr.collectibleX;
+    const cy = scr.collectibleY;
+    const bob = Math.sin(frameCount * 0.06) * 3;
+    drawCollectible(cx, cy + bob, scr.collectibleType);
+  }
+
+  // Hazards
+  for (const haz of scr.hazards) {
+    const hx = ox + haz.x;
+    drawHazard(haz, hx);
+  }
+
+  // Underground hazards (if player is underground)
+  if (harry && harry.isUnderground) {
+    for (const haz of scr.underHazards) {
+      const hx = ox + haz.x;
+      if (haz.type === 'wall') {
+        ctx.fillStyle = PAL.gray;
+        ctx.fillRect(hx, haz.y, haz.w, haz.h);
+        ctx.fillStyle = PAL.darkGray;
+        ctx.fillRect(hx + 2, haz.y + 2, haz.w - 4, haz.h - 4);
+      } else {
+        drawHazard(haz, hx);
+      }
+    }
+  }
+}
+
+function drawCollectible(x, y, type) {
+  // Sparkle effect
+  const sparkle = Math.sin(frameCount * 0.15) > 0.5;
+
+  switch (type) {
+    case 'gold':
+      ctx.fillStyle = PAL.gold;
+      ctx.fillRect(x, y, 12, 8);
+      ctx.fillStyle = sparkle ? PAL.brightYellow : PAL.medBrown;
+      ctx.fillRect(x + 2, y + 2, 8, 4);
+      ctx.fillStyle = PAL.brightYellow;
+      ctx.fillRect(x + 4, y + 1, 2, 1);
+      break;
+    case 'silver':
+      ctx.fillStyle = PAL.lightGray;
+      ctx.fillRect(x, y, 12, 8);
+      ctx.fillStyle = sparkle ? PAL.white : PAL.gray;
+      ctx.fillRect(x + 2, y + 2, 8, 4);
+      ctx.fillStyle = PAL.white;
+      ctx.fillRect(x + 4, y + 1, 2, 1);
+      break;
+    case 'ring':
+      ctx.fillStyle = PAL.gold;
+      ctx.beginPath();
+      ctx.arc(x + 6, y + 6, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = PAL.black;
+      ctx.beginPath();
+      ctx.arc(x + 6, y + 6, 3, 0, Math.PI * 2);
+      ctx.fill();
+      // Diamond on top
+      ctx.fillStyle = sparkle ? PAL.white : PAL.skyBlue;
+      ctx.fillRect(x + 3, y - 1, 6, 4);
+      ctx.fillStyle = PAL.paleBlue;
+      ctx.fillRect(x + 5, y, 2, 2);
+      break;
+    case 'money':
+      ctx.fillStyle = PAL.brightGreen;
+      ctx.fillRect(x, y, 10, 14);
+      ctx.fillStyle = PAL.darkGreen;
+      ctx.fillRect(x + 1, y + 1, 8, 12);
+      ctx.fillStyle = PAL.brightGreen;
+      ctx.fillRect(x + 4, y + 3, 2, 8);
+      ctx.fillRect(x + 2, y + 5, 6, 4);
+      if (sparkle) {
+        ctx.fillStyle = PAL.brightYellow;
+        ctx.fillRect(x + 1, y + 1, 1, 1);
+      }
+      break;
+  }
+}
+
+function drawHazard(haz, hx) {
+  switch (haz.type) {
+    case 'log':
+      // Rolling log with rotation effect
+      ctx.fillStyle = PAL.brown;
+      ctx.beginPath();
+      ctx.arc(hx + 10, haz.y + 6, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = PAL.darkBrown;
+      ctx.beginPath();
+      ctx.arc(hx + 10, haz.y + 6, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = PAL.tan;
+      // Ring pattern (rotating)
+      const angle = frameCount * 0.1;
+      ctx.fillRect(hx + 10 + Math.cos(angle) * 5 - 1, haz.y + 6 + Math.sin(angle) * 5 - 1, 2, 2);
+      ctx.fillRect(hx + 10 + Math.cos(angle + Math.PI) * 5 - 1, haz.y + 6 + Math.sin(angle + Math.PI) * 5 - 1, 2, 2);
+      break;
+    case 'scorpion':
+      drawPixels(hx, haz.y, SCORPION_SPRITE, SCORPION_PALETTE, 2);
+      break;
+    case 'snake':
+      const sFrame = Math.floor(frameCount / 10) % 2;
+      drawPixels(hx, haz.y + (sFrame ? -1 : 1), SNAKE_SPRITE, SNAKE_PALETTE, 2);
+      break;
+    case 'fire':
+      drawFire(hx, haz.y);
+      break;
+  }
+}
+
+function drawFire(x, y) {
+  const flicker = frameCount % 6;
+  // Outer flame
+  ctx.fillStyle = flicker < 3 ? PAL.red : PAL.orange;
+  ctx.fillRect(x + 2, y, 8, 16);
+  ctx.fillRect(x, y + 4, 12, 10);
+  // Inner flame
+  ctx.fillStyle = flicker < 2 ? PAL.gold : PAL.brightYellow;
+  ctx.fillRect(x + 4, y + 4, 4, 10);
+  // Tips
+  ctx.fillStyle = PAL.brightYellow;
+  const tip1 = Math.sin(frameCount * 0.2) * 2;
+  const tip2 = Math.cos(frameCount * 0.25) * 2;
+  ctx.fillRect(x + 4 + tip1, y - 2, 2, 3);
+  ctx.fillRect(x + 7 + tip2, y - 1, 2, 3);
+  // Embers
+  if (frameCount % 10 < 3) {
+    ctx.fillStyle = PAL.brightYellow;
+    ctx.fillRect(x + 6 + Math.sin(frameCount * 0.3) * 4, y - 4 - (frameCount % 10), 1, 1);
+  }
+}
+
+// --- Draw Harry ---
+function drawHarry() {
+  if (harry.isDead) return;
+  if (harry.invincible > 0 && frameCount % 4 < 2) return; // blink
+
+  const px = Math.floor(harry.x - camera.x);
+  const py = Math.floor(harry.y);
+
+  ctx.save();
+  if (harry.facing < 0) {
+    ctx.translate(px + 7, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(-(px + 7), 0);
+  }
+
+  let sprite;
+  if (harry.isSwinging) {
+    sprite = HARRY_SWING;
+  } else if (!harry.onGround) {
+    sprite = HARRY_JUMP;
+  } else if (Math.abs(harry.vx) > 0.3) {
+    const frame = Math.floor(harry.animFrame) % 4;
+    sprite = HARRY_RUN[frame];
+  } else {
+    sprite = HARRY_STAND;
+  }
+
+  drawPixels(px - 3, py - 2, sprite, HARRY_PALETTE, 2);
+  ctx.restore();
+}
+
+// --- HUD ---
+function drawHUD() {
+  // HUD background
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, W, 22);
+
+  ctx.fillStyle = PAL.white;
+  ctx.font = 'bold 10px monospace';
+
+  // Score
+  ctx.fillStyle = PAL.brightYellow;
+  ctx.fillText('SCORE', 8, 10);
+  ctx.fillStyle = PAL.white;
+  ctx.fillText(String(score).padStart(6, '0'), 8, 19);
+
+  // Lives
+  ctx.fillStyle = PAL.brightRed;
+  ctx.fillText('LIVES', W / 2 - 60, 10);
+  for (let i = 0; i < lives; i++) {
+    // Mini harry head
+    ctx.fillStyle = PAL.tan;
+    ctx.fillRect(W / 2 - 60 + i * 14, 12, 8, 8);
+    ctx.fillStyle = PAL.brown;
+    ctx.fillRect(W / 2 - 60 + i * 14, 12, 8, 3);
+  }
+
+  // Timer
+  const mins = Math.floor(timeLeft / 60);
+  const secs = Math.floor(timeLeft % 60);
+  const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  ctx.fillStyle = timeLeft < 120 ? PAL.red : PAL.limeGreen;
+  ctx.fillText('TIME', W - 70, 10);
+  ctx.fillStyle = PAL.white;
+  ctx.fillText(timeStr, W - 70, 19);
+
+  // Screen number
+  ctx.fillStyle = PAL.gray;
+  ctx.font = '8px monospace';
+  ctx.fillText(`SCR:${currentScreen + 1}`, W / 2 + 20, 18);
+
+  // Underground indicator
+  if (harry && harry.isUnderground) {
+    ctx.fillStyle = PAL.gold;
+    ctx.fillText('UNDERGROUND', W / 2 - 25, 10);
+  }
+}
+
+// --- Touch Controls Overlay ---
+function drawTouchControls() {
+  ctx.globalAlpha = 0.15;
+
+  // Left zone
+  ctx.fillStyle = PAL.white;
+  ctx.fillRect(0, H * 0.5, W * 0.33, H * 0.5);
+  ctx.fillStyle = PAL.black;
+  ctx.font = 'bold 20px monospace';
+  ctx.fillText('<', W * 0.15, H * 0.78);
+
+  // Right zone
+  ctx.fillStyle = PAL.white;
+  ctx.fillRect(W * 0.67, H * 0.5, W * 0.33, H * 0.5);
+  ctx.fillStyle = PAL.black;
+  ctx.fillText('>', W * 0.82, H * 0.78);
+
+  // Jump zone indicator
+  ctx.fillStyle = PAL.skyBlue;
+  ctx.fillRect(W * 0.33, 22, W * 0.34, H * 0.28);
+  ctx.fillStyle = PAL.black;
+  ctx.font = '12px monospace';
+  ctx.fillText('JUMP', W * 0.45, H * 0.22);
+
+  ctx.globalAlpha = 1.0;
+}
+
+// --- Particles ---
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 4,
+      vy: -Math.random() * 3 - 1,
+      life: 30 + Math.random() * 20,
+      color,
+      size: 1 + Math.floor(Math.random() * 3),
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.1;
+    p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = Math.min(1, p.life / 15);
+    ctx.fillRect(Math.floor(p.x - camera.x), Math.floor(p.y), p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// --- Collision ---
+function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+// --- Game Logic ---
+function startGame() {
+  score = 2000;
+  lives = 3;
+  timeLeft = GAME_TIME;
+  currentScreen = 0;
+  harry = createHarry();
+  camera = createCamera();
+  screenCache = {};
+  particles = [];
+  gameState = 'playing';
+
+  // Pre-generate a few screens
+  for (let i = 0; i < 5; i++) generateScreen(i);
+
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    if (gameState === 'playing') {
+      timeLeft -= 1;
+      if (timeLeft <= 0) {
+        timeLeft = 0;
+        gameOver();
+      }
+    }
+  }, 1000);
+}
+
+function gameOver() {
+  gameState = 'gameover';
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  try { if (SFX && SFX.die) SFX.die(); } catch(e) {}
+}
+
+function hurtHarry(penalty) {
+  if (harry.invincible > 0 || harry.isDead) return;
+  score -= penalty || 100;
+  if (score < 0) score = 0;
+  lives--;
+  try { if (SFX && SFX.loseLife) SFX.loseLife(); } catch(e) {}
+
+  if (lives <= 0) {
+    harry.isDead = true;
+    setTimeout(() => gameOver(), 1500);
+  } else {
+    harry.invincible = 90; // 1.5 seconds
+    harry.vy = JUMP_FORCE * 0.5;
+    spawnParticles(harry.x, harry.y + 10, PAL.red, 8);
+  }
+}
+
+function respawnHarry() {
+  harry.x = currentScreen * W + 80;
+  harry.y = harry.isUnderground ? H * 0.85 - 24 : H * 0.48 - 24;
+  harry.vx = 0;
+  harry.vy = 0;
+  harry.isSwinging = false;
+  harry.onGround = false;
+}
+
+function updateHarry() {
+  if (harry.isDead) {
+    harry.deathTimer++;
+    return;
+  }
+
+  // Input
+  harry.runInput = 0;
+  if (keys['ArrowLeft'] || keys['KeyA'] || touchLeft) harry.runInput = -1;
+  if (keys['ArrowRight'] || keys['KeyD'] || touchRight) harry.runInput = 1;
+  harry.jumpInput = keys['ArrowUp'] || keys['KeyW'] || keys['Space'] || touchJump;
+
+  if (harry.invincible > 0) harry.invincible--;
+
+  // Vine swinging
+  if (harry.isSwinging) {
+    harry.vineAngle += harry.vineDir * VINE_SWING_SPEED;
+    if (Math.abs(harry.vineAngle) > 1.2) harry.vineDir *= -1;
+
+    harry.x = harry.vineAnchorX + Math.sin(harry.vineAngle) * harry.vineLength;
+    harry.y = harry.vineAnchorY + Math.cos(harry.vineAngle) * harry.vineLength - harry.h;
+
+    // Jump off vine
+    if (harry.jumpInput) {
+      harry.isSwinging = false;
+      harry.vx = Math.sin(harry.vineAngle) * 5 * harry.vineDir;
+      harry.vy = JUMP_FORCE * 0.7;
+      harry.isJumping = true;
+      try { if (SFX && SFX.paddleHit) SFX.paddleHit(); } catch(e) {}
+    }
+    return;
+  }
+
+  // Horizontal movement
+  if (harry.runInput !== 0) {
+    harry.vx += harry.runInput * 0.5;
+    harry.facing = harry.runInput;
+    if (harry.onGround) {
+      harry.animTimer += 0.2;
+      harry.animFrame += 0.15;
+    }
+  } else {
+    harry.vx *= 0.7;
+    if (Math.abs(harry.vx) < 0.1) harry.vx = 0;
+  }
+  harry.vx = Math.max(-RUN_SPEED, Math.min(RUN_SPEED, harry.vx));
+
+  // Jump
+  if (harry.jumpInput && harry.onGround && !harry.isJumping) {
+    harry.vy = JUMP_FORCE;
+    harry.isJumping = true;
+    harry.onGround = false;
+    try { if (SFX && SFX.paddleHit) SFX.paddleHit(); } catch(e) {}
+  }
+
+  // Gravity
+  harry.vy += GRAVITY;
+  harry.vy = Math.min(harry.vy, 10);
+
+  // Move
+  harry.x += harry.vx;
+  harry.y += harry.vy;
+
+  // Ground collision
+  const groundY = harry.isUnderground ? H * 0.85 - harry.h : H * 0.48 - harry.h;
+
+  // Check if over a hole
+  const scr = generateScreen(currentScreen);
+  const harryScreenX = harry.x - currentScreen * W;
+  let overHole = false;
+
+  if (scr.hasHole && !harry.isUnderground) {
+    if (harryScreenX + harry.w > scr.holeX + 4 && harryScreenX < scr.holeX + scr.holeW - 4) {
+      overHole = true;
+    }
+  }
+
+  if (!overHole || harry.isUnderground) {
+    if (harry.y >= groundY) {
+      harry.y = groundY;
+      harry.vy = 0;
+      harry.onGround = true;
+      harry.isJumping = false;
+    }
+  } else {
+    harry.onGround = false;
+    // Falling into pit
+    if (harry.y > H * 0.48 + 10 && !harry.isUnderground) {
+      // Check croc mouths - can stand on closed croc mouths
+      let onCroc = false;
+      for (const croc of scr.crocs) {
+        const crocScreenX = croc.x;
+        if (!croc.mouthOpen &&
+            harryScreenX + harry.w > crocScreenX &&
+            harryScreenX < crocScreenX + croc.w &&
+            harry.y + harry.h >= croc.y && harry.y + harry.h <= croc.y + 8) {
+          harry.y = croc.y - harry.h;
+          harry.vy = 0;
+          harry.onGround = true;
+          harry.isJumping = false;
+          onCroc = true;
+          break;
+        }
+      }
+
+      if (!onCroc) {
+        // Fell into the pit
+        if (harry.y > H * 0.65) {
+          if (scr.type === SCR_WATER || scr.type === SCR_TAR || scr.type === SCR_QUICKSAND) {
+            spawnParticles(harry.x, harry.y, PAL.skyBlue, 10);
+            hurtHarry(100);
+            respawnHarry();
+          } else if (scr.type === SCR_CROC) {
+            hurtHarry(100);
+            respawnHarry();
+          } else {
+            // Normal pit - go underground
+            harry.isUnderground = true;
+            harry.y = H * 0.68;
+          }
+        }
+      }
+    }
+  }
+
+  // Grab vine
+  if (scr.hasVine && !harry.isSwinging && !harry.onGround && (swipeUp || keys['KeyE'])) {
+    const vineScreenX = scr.vineX;
+    if (Math.abs(harryScreenX - vineScreenX) < 25 && harry.y < H * 0.4) {
+      harry.isSwinging = true;
+      harry.vineAnchorX = currentScreen * W + vineScreenX;
+      harry.vineAnchorY = 10;
+      harry.vineLength = harry.y + harry.h - 10;
+      harry.vineAngle = Math.atan2(harry.x - harry.vineAnchorX, harry.vineLength);
+      harry.vineDir = harry.vx > 0 ? 1 : -1;
+      try { if (SFX && SFX.eat) SFX.eat(); } catch(e) {}
+    }
+    swipeUp = false;
+  }
+
+  // Go underground via ladder
+  if (scr.hasLadder && !harry.isUnderground && harry.onGround && (swipeDown || keys['ArrowDown'] || keys['KeyS'])) {
+    if (Math.abs(harryScreenX - scr.ladderX) < 20) {
+      harry.isUnderground = true;
+      harry.y = H * 0.85 - harry.h;
+      harry.vy = 0;
+      swipeDown = false;
+      try { if (SFX && SFX.move) SFX.move(); } catch(e) {}
+    }
+  }
+
+  // Come back above ground (at ladder or screen edges)
+  if (harry.isUnderground && (swipeUp || keys['ArrowUp'] || keys['KeyW'])) {
+    if (scr.hasLadder && Math.abs(harryScreenX - scr.ladderX) < 20) {
+      harry.isUnderground = false;
+      harry.y = H * 0.48 - harry.h;
+      harry.vy = 0;
+      swipeUp = false;
+      try { if (SFX && SFX.move) SFX.move(); } catch(e) {}
+    }
+  }
+
+  // Prevent going too high
+  if (harry.y < -20) harry.y = -20;
+
+  // Fall off screen
+  if (harry.y > H + 20) {
+    hurtHarry(100);
+    respawnHarry();
+  }
+
+  // Screen transitions
+  const worldX = harry.x;
+  const newScreen = Math.floor(worldX / W);
+  if (newScreen !== currentScreen && newScreen >= 0) {
+    currentScreen = newScreen % TOTAL_SCREENS;
+    // Pre-generate adjacent screens
+    generateScreen(currentScreen);
+    generateScreen((currentScreen + 1) % TOTAL_SCREENS);
+    if (currentScreen > 0) generateScreen(currentScreen - 1);
+  }
+
+  // Clamp to world bounds
+  if (harry.x < 0) harry.x = 0;
+  if (harry.x > TOTAL_SCREENS * W - 20) harry.x = TOTAL_SCREENS * W - 20;
+
+  // Reset swipes
+  swipeUp = false;
+  swipeDown = false;
+}
+
+function updateHazards() {
+  const scr = generateScreen(currentScreen);
+  const harryScreenX = harry.x - currentScreen * W;
+
+  // Update & collide hazards
+  const hazardList = harry.isUnderground ? scr.underHazards : scr.hazards;
+  for (const haz of hazardList) {
+    // Move rolling hazards
+    if (haz.vx) {
+      haz.x += haz.vx;
+      if (haz.x < 20 || haz.x > W - 40) haz.vx *= -1;
+    }
+
+    // Collision with Harry
+    if (!harry.isDead && harry.invincible <= 0) {
+      const hw = haz.type === 'wall' ? haz.w : (haz.w * 2 || 16);
+      const hh = haz.type === 'wall' ? haz.h : (haz.h * 2 || 16);
+      const hy = haz.type === 'wall' ? haz.y : haz.y;
+
+      if (rectsOverlap(harryScreenX, harry.y, harry.w, harry.h, haz.x, hy, hw, hh)) {
+        if (haz.type === 'wall') {
+          // Block movement
+          harry.vx = 0;
+          if (harryScreenX < haz.x) harry.x = currentScreen * W + haz.x - harry.w;
+          else harry.x = currentScreen * W + haz.x + haz.w;
+        } else {
+          hurtHarry(haz.type === 'log' ? 50 : 100);
+        }
+      }
+    }
+  }
+
+  // Croc collision
+  if (!harry.isUnderground) {
+    for (const croc of scr.crocs) {
+      if (croc.mouthOpen && !harry.isDead && harry.invincible <= 0) {
+        if (rectsOverlap(harryScreenX, harry.y + harry.h - 6, harry.w, 6,
+                         croc.x, croc.y, croc.w * 2, croc.h * 2)) {
+          hurtHarry(150);
+        }
+      }
+    }
+  }
+
+  // Collectible pickup
+  if (scr.hasCollectible && !scr.collectibleTaken) {
+    const cx = scr.collectibleX;
+    const cy = scr.collectibleY;
+    if (rectsOverlap(harryScreenX, harry.y, harry.w, harry.h, cx - 2, cy - 2, 16, 16)) {
+      scr.collectibleTaken = true;
+      const points = { gold: 4000, silver: 3000, ring: 5000, money: 2000 }[scr.collectibleType];
+      score += points;
+      spawnParticles(harry.x, harry.y, PAL.brightYellow, 12);
+      try {
+        if (SFX && SFX.powerUp) SFX.powerUp();
+        else if (SFX && SFX.eat) SFX.eat();
+      } catch(e) {}
+
+      // Show points popup
+      particles.push({
+        x: harry.x, y: harry.y - 10,
+        vx: 0, vy: -1,
+        life: 45,
+        color: PAL.brightYellow,
+        size: 0, // flag for text particle
+        text: `+${points}`
+      });
+    }
+  }
+}
+
+function updateCamera() {
+  camera.targetX = harry.x - W * 0.35;
+  camera.x += (camera.targetX - camera.x) * 0.08;
+
+  // Clamp
+  camera.x = Math.max(0, Math.min(camera.x, TOTAL_SCREENS * W - W));
+
+  // Shake
+  if (camera.shake > 0) {
+    camera.shake *= 0.9;
+    if (camera.shake < 0.5) camera.shake = 0;
+  }
+}
+
+// --- Title Screen ---
+function drawTitle() {
+  // Jungle background
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, PAL.darkGreen);
+  grad.addColorStop(0.5, '#003000');
+  grad.addColorStop(1, PAL.black);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Vine decorations
+  ctx.strokeStyle = PAL.green;
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 5; i++) {
+    const vx = 50 + i * 100;
+    const sway = Math.sin(frameCount * 0.015 + i) * 10;
+    ctx.beginPath();
+    ctx.moveTo(vx, 0);
+    ctx.quadraticCurveTo(vx + sway, H * 0.4, vx + sway * 0.5, H);
+    ctx.stroke();
+    // Leaves
+    ctx.fillStyle = PAL.brightGreen;
+    for (let ly = 20; ly < H - 20; ly += 30) {
+      const lx = vx + Math.sin(frameCount * 0.015 + i) * (ly / H) * 10;
+      ctx.fillRect(lx - 3, ly, 4, 6);
+    }
+  }
+
+  // Title box
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(W * 0.15, H * 0.12, W * 0.7, H * 0.35);
+  ctx.strokeStyle = PAL.gold;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W * 0.15, H * 0.12, W * 0.7, H * 0.35);
+
+  // Title text
+  ctx.fillStyle = PAL.gold;
+  ctx.font = 'bold 32px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('PITFALL!', W / 2, H * 0.26);
+
+  ctx.fillStyle = PAL.brightGreen;
+  ctx.font = '10px monospace';
+  ctx.fillText('THE NES ADVENTURE', W / 2, H * 0.34);
+
+  ctx.fillStyle = PAL.lightGray;
+  ctx.font = '8px monospace';
+  ctx.fillText('INSPIRED BY ACTIVISION 1982', W / 2, H * 0.42);
+
+  // Harry sprite in title
+  const titleHarryX = W / 2 - 7;
+  const titleHarryY = H * 0.50;
+  const runFrame = HARRY_RUN[Math.floor(frameCount / 8) % 4];
+  drawPixels(titleHarryX, titleHarryY, runFrame, HARRY_PALETTE, 2);
+
+  // Instructions
+  ctx.fillStyle = PAL.white;
+  ctx.font = '9px monospace';
+  const blink = Math.sin(frameCount * 0.06) > 0;
+  if (blink) {
+    ctx.fillText('TAP OR PRESS ENTER TO START', W / 2, H * 0.78);
+  }
+
+  ctx.fillStyle = PAL.skyBlue;
+  ctx.font = '8px monospace';
+  ctx.fillText('ARROWS/WASD: MOVE  |  SPACE/UP: JUMP', W / 2, H * 0.86);
+  ctx.fillText('DOWN: LADDER  |  E: GRAB VINE', W / 2, H * 0.93);
+
+  ctx.textAlign = 'left';
+}
+
+// --- Game Over Screen ---
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = PAL.red;
+  ctx.font = 'bold 28px monospace';
+  ctx.fillText('GAME OVER', W / 2, H * 0.3);
+
+  ctx.fillStyle = PAL.gold;
+  ctx.font = '14px monospace';
+  ctx.fillText(`FINAL SCORE: ${score}`, W / 2, H * 0.45);
+
+  const mins = Math.floor((GAME_TIME - timeLeft) / 60);
+  const secs = Math.floor((GAME_TIME - timeLeft) % 60);
+  ctx.fillStyle = PAL.lightGray;
+  ctx.font = '10px monospace';
+  ctx.fillText(`TIME SURVIVED: ${mins}m ${secs}s`, W / 2, H * 0.55);
+  ctx.fillText(`SCREENS EXPLORED: ${currentScreen + 1}`, W / 2, H * 0.63);
+
+  // Rating
+  let rating;
+  if (score >= 100000) rating = 'MASTER EXPLORER!';
+  else if (score >= 50000) rating = 'EXPERT ADVENTURER';
+  else if (score >= 20000) rating = 'JUNGLE EXPLORER';
+  else if (score >= 5000) rating = 'NOVICE';
+  else rating = 'TOURIST';
+
+  ctx.fillStyle = PAL.brightGreen;
+  ctx.font = 'bold 12px monospace';
+  ctx.fillText(rating, W / 2, H * 0.75);
+
+  const blink = Math.sin(frameCount * 0.06) > 0;
+  if (blink) {
+    ctx.fillStyle = PAL.white;
+    ctx.font = '9px monospace';
+    ctx.fillText('TAP OR PRESS ENTER TO CONTINUE', W / 2, H * 0.88);
+  }
+
+  ctx.textAlign = 'left';
+}
+
+// --- Resize ---
+function resize() {
+  const maxW = window.innerWidth;
+  const maxH = window.innerHeight;
+  const scaleX = maxW / W;
+  const scaleY = maxH / H;
+  const scale = Math.min(scaleX, scaleY);
+  canvas.width = W;
+  canvas.height = H;
+  canvas.style.width = Math.floor(W * scale) + 'px';
+  canvas.style.height = Math.floor(H * scale) + 'px';
+}
+
+// --- Main Loop ---
+function update() {
+  if (gameState !== 'playing') return;
+  updateHarry();
+  updateHazards();
+  updateCamera();
+  updateParticles();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  if (gameState === 'title') {
+    drawTitle();
+    frameCount++;
+    return;
+  }
+
+  if (gameState === 'gameover') {
+    // Draw the game behind the overlay
+    drawGameFrame();
+    drawGameOver();
+    frameCount++;
+    return;
+  }
+
+  drawGameFrame();
+  frameCount++;
+}
+
+function drawGameFrame() {
+  // Camera shake offset
+  const shakeX = camera.shake ? (Math.random() - 0.5) * camera.shake : 0;
+  const shakeY = camera.shake ? (Math.random() - 0.5) * camera.shake : 0;
+
+  ctx.save();
+  ctx.translate(Math.floor(shakeX), Math.floor(shakeY));
+
+  // Background
+  drawParallaxBG(camera.x, harry.isUnderground);
+
+  // Draw visible screens' elements
+  const startScreen = Math.max(0, Math.floor(camera.x / W) - 1);
+  const endScreen = Math.min(TOTAL_SCREENS - 1, Math.ceil((camera.x + W) / W) + 1);
+  for (let s = startScreen; s <= endScreen; s++) {
+    const scr = generateScreen(s);
+    drawScreenElements(scr, camera.x);
+  }
+
+  // Harry
+  drawHarry();
+
+  // Vine (draw harry on vine)
+  if (harry.isSwinging) {
+    const scr = generateScreen(currentScreen);
+    if (scr.hasVine) {
+      ctx.strokeStyle = PAL.darkGreen;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(harry.vineAnchorX - camera.x, harry.vineAnchorY);
+      ctx.lineTo(harry.x - camera.x + harry.w / 2, harry.y + 5);
+      ctx.stroke();
+    }
+  }
+
+  // Particles
+  drawParticles();
+
+  // Draw text particles (score popups)
+  for (const p of particles) {
+    if (p.text) {
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.min(1, p.life / 20);
+      ctx.font = 'bold 10px monospace';
+      ctx.fillText(p.text, Math.floor(p.x - camera.x), Math.floor(p.y));
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  ctx.restore();
+
+  // HUD (not affected by camera shake)
+  drawHUD();
+
+  // Touch controls (very subtle)
+  if ('ontouchstart' in window) {
+    drawTouchControls();
+  }
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// --- Input: Enter to start ---
+document.addEventListener('keydown', e => {
+  if (e.code === 'Enter') {
+    if (gameState === 'title') startGame();
+    else if (gameState === 'gameover') gameState = 'title';
+  }
+});
+
+// --- Init ---
+function init() {
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Wait for loader
+  if (window._gameReady) {
+    gameLoop();
+  } else {
+    window.addEventListener('gameready', () => gameLoop());
+    // Fallback in case loader doesn't fire
+    setTimeout(() => {
+      if (gameState !== 'playing') gameLoop();
+    }, 3000);
+  }
+}
+
+init();
+</script>
+</body></html>

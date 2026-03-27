@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>River Raid</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #000; overflow: hidden; touch-action: none; }
+  canvas { display: block; }
+</style>
+</head><body>
+<canvas id="c"></canvas>
+<script src="sound.js"></script>
+<script src="loader.js"></script>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+const W = () => canvas.width;
+const H = () => canvas.height;
+
+// Atari 2600 palette
+const COL_RIVER    = '#4444CC';
+const COL_BANK     = '#44AA44';
+const COL_BANK_ALT = '#338833';
+const COL_BG       = '#000000';
+const COL_PLANE_W  = '#FFFFFF';
+const COL_PLANE_R  = '#CC2222';
+const COL_HELI     = '#CC44CC';
+const COL_JET      = '#AAAAAA';
+const COL_TANK     = '#886622';
+const COL_TANK_GUN = '#CCAA44';
+const COL_SHIP     = '#666666';
+const COL_FUEL     = '#CCCC22';
+const COL_FUEL_LBL = '#884400';
+const COL_BRIDGE   = '#888888';
+const COL_BRIDGE_D = '#AA4444';
+const COL_BULLET   = '#FFFF44';
+const COL_ENEMY_BUL= '#FF4444';
+const COL_EXPLODE  = '#FF8800';
+const COL_SCORE    = '#FFFFFF';
+const COL_FUEL_BAR = '#22CC22';
+const COL_FUEL_LOW = '#CC2222';
+
+// Pixel scale — each game pixel = PX screen pixels
+let PX = 4;
+function updateScale() {
+  PX = Math.max(2, Math.floor(Math.min(W(), H()) / 160));
+}
+updateScale();
+window.addEventListener('resize', () => { resize(); updateScale(); });
+
+// Game state
+let player, bullets, enemies, fuelDepots, bridges, explosions;
+let riverSegments, scrollY, scrollSpeed, baseScrollSpeed;
+let fuel, score, lives, level, section;
+let gameOver, gameStarted, paused;
+let touchLeft, touchRight, firing;
+let tankBullets;
+let lastTime;
+
+// Chunky pixel font (3x5 bitmaps)
+const FONT = {
+  '0': [0x7,0x5,0x5,0x5,0x7],
+  '1': [0x2,0x6,0x2,0x2,0x7],
+  '2': [0x7,0x1,0x7,0x4,0x7],
+  '3': [0x7,0x1,0x7,0x1,0x7],
+  '4': [0x5,0x5,0x7,0x1,0x1],
+  '5': [0x7,0x4,0x7,0x1,0x7],
+  '6': [0x7,0x4,0x7,0x5,0x7],
+  '7': [0x7,0x1,0x1,0x1,0x1],
+  '8': [0x7,0x5,0x7,0x5,0x7],
+  '9': [0x7,0x5,0x7,0x1,0x7],
+  'A': [0x2,0x5,0x7,0x5,0x5],
+  'B': [0x6,0x5,0x6,0x5,0x6],
+  'C': [0x7,0x4,0x4,0x4,0x7],
+  'D': [0x6,0x5,0x5,0x5,0x6],
+  'E': [0x7,0x4,0x7,0x4,0x7],
+  'F': [0x7,0x4,0x7,0x4,0x4],
+  'G': [0x7,0x4,0x5,0x5,0x7],
+  'H': [0x5,0x5,0x7,0x5,0x5],
+  'I': [0x7,0x2,0x2,0x2,0x7],
+  'J': [0x1,0x1,0x1,0x5,0x7],
+  'K': [0x5,0x5,0x6,0x5,0x5],
+  'L': [0x4,0x4,0x4,0x4,0x7],
+  'M': [0x5,0x7,0x7,0x5,0x5],
+  'N': [0x5,0x7,0x7,0x7,0x5],
+  'O': [0x7,0x5,0x5,0x5,0x7],
+  'P': [0x7,0x5,0x7,0x4,0x4],
+  'R': [0x7,0x5,0x7,0x6,0x5],
+  'S': [0x7,0x4,0x7,0x1,0x7],
+  'T': [0x7,0x2,0x2,0x2,0x2],
+  'U': [0x5,0x5,0x5,0x5,0x7],
+  'V': [0x5,0x5,0x5,0x5,0x2],
+  'W': [0x5,0x5,0x7,0x7,0x5],
+  'X': [0x5,0x5,0x2,0x5,0x5],
+  ' ': [0x0,0x0,0x0,0x0,0x0],
+  ':': [0x0,0x2,0x0,0x2,0x0],
+  '-': [0x0,0x0,0x7,0x0,0x0],
+};
+
+function drawChar(ch, x, y, color, scale) {
+  const bm = FONT[ch];
+  if (!bm) return;
+  ctx.fillStyle = color;
+  const s = scale || PX;
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 3; col++) {
+      if (bm[row] & (4 >> col)) {
+        ctx.fillRect(x + col * s, y + row * s, s, s);
+      }
+    }
+  }
+}
+
+function drawText(str, x, y, color, scale) {
+  const s = scale || PX;
+  for (let i = 0; i < str.length; i++) {
+    drawChar(str[i], x + i * 4 * s, y, color, s);
+  }
+}
+
+function textWidth(str, scale) {
+  const s = scale || PX;
+  return str.length * 4 * s - s;
+}
+
+// River generation — procedural sine-based banks
+const SEGMENT_HEIGHT = 1; // each segment = 1 game pixel tall
+let riverGenY = 0;
+let riverPhase = 0;
+let riverFreq = 0.008;
+let riverCenterX = 0.5;
+let riverWidth = 0.45;
+let nextSpawnY = 0;
+let nextBridgeY = 0;
+let sectionCount = 0;
+
+function generateRiverSegment(worldY) {
+  const phase = worldY * riverFreq;
+  const center = 0.5 + Math.sin(phase * 1.0) * 0.15 + Math.sin(phase * 2.3 + 1.5) * 0.08;
+  // Width narrows gradually with difficulty
+  const minWidth = Math.max(0.18, 0.42 - level * 0.015);
+  const maxWidth = Math.max(0.25, 0.50 - level * 0.01);
+  const width = minWidth + (maxWidth - minWidth) * (0.5 + 0.5 * Math.sin(phase * 0.4 + 3.0));
+  return { centerX: center, width: width };
+}
+
+function getRiverAt(worldY) {
+  const seg = generateRiverSegment(worldY);
+  const w = W();
+  const leftBank = (seg.centerX - seg.width / 2) * w;
+  const rightBank = (seg.centerX + seg.width / 2) * w;
+  return { left: leftBank, right: rightBank, cx: seg.centerX * w };
+}
+
+function init() {
+  updateScale();
+  player = {
+    x: W() / 2,
+    y: H() * 0.75,
+    w: 8 * PX,
+    h: 8 * PX,
+    speed: 0,
+    dead: false,
+    respawnTimer: 0,
+    invincible: 0,
+  };
+
+  bullets = [];
+  enemies = [];
+  fuelDepots = [];
+  bridges = [];
+  explosions = [];
+  tankBullets = [];
+
+  scrollY = 0;
+  baseScrollSpeed = 120 * PX / 4;
+  scrollSpeed = baseScrollSpeed;
+
+  fuel = 100;
+  score = 0;
+  lives = 3;
+  level = 1;
+  section = 0;
+  sectionCount = 0;
+  gameOver = false;
+  gameStarted = false;
+
+  touchLeft = false;
+  touchRight = false;
+  firing = false;
+
+  riverFreq = 0.008;
+
+  nextSpawnY = 300;
+  nextBridgeY = 600;
+
+  lastTime = performance.now();
+}
+
+function spawnEnemy(worldY) {
+  const river = getRiverAt(worldY);
+  const riverW = river.right - river.left;
+  const roll = Math.random();
+
+  if (roll < 0.3) {
+    // Helicopter — moves side to side in river
+    enemies.push({
+      type: 'heli',
+      x: river.left + riverW * (0.2 + Math.random() * 0.6),
+      worldY: worldY,
+      w: 7 * PX, h: 5 * PX,
+      dx: (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 30) * PX / 4,
+      hp: 1,
+      score: 60,
+      frame: 0,
+    });
+  } else if (roll < 0.5) {
+    // Jet — fast, straight line
+    enemies.push({
+      type: 'jet',
+      x: river.left + riverW * (0.2 + Math.random() * 0.6),
+      worldY: worldY,
+      w: 5 * PX, h: 7 * PX,
+      dx: 0,
+      dy: (60 + level * 10) * PX / 4,
+      hp: 1,
+      score: 100,
+    });
+  } else if (roll < 0.75) {
+    // Tank — on bank, shoots
+    const onLeft = Math.random() < 0.5;
+    const tankX = onLeft ? river.left - 5 * PX : river.right + 1 * PX;
+    enemies.push({
+      type: 'tank',
+      x: tankX,
+      worldY: worldY,
+      w: 6 * PX, h: 4 * PX,
+      dx: 0,
+      hp: 1,
+      score: 80,
+      shootTimer: 1 + Math.random() * 2,
+      onLeft: onLeft,
+    });
+  } else {
+    // Ship — in river, slow
+    enemies.push({
+      type: 'ship',
+      x: river.left + riverW * (0.3 + Math.random() * 0.4),
+      worldY: worldY,
+      w: 6 * PX, h: 4 * PX,
+      dx: (Math.random() < 0.5 ? -1 : 1) * (15 + Math.random() * 15) * PX / 4,
+      hp: 1,
+      score: 30,
+    });
+  }
+}
+
+function spawnFuel(worldY) {
+  const river = getRiverAt(worldY);
+  const riverW = river.right - river.left;
+  fuelDepots.push({
+    x: river.left + riverW * (0.3 + Math.random() * 0.4),
+    worldY: worldY,
+    w: 6 * PX,
+    h: 5 * PX,
+    alive: true,
+  });
+}
+
+function spawnBridge(worldY) {
+  const river = getRiverAt(worldY);
+  bridges.push({
+    worldY: worldY,
+    left: river.left,
+    right: river.right,
+    h: 3 * PX,
+    hp: 3,
+    alive: true,
+  });
+}
+
+function addExplosion(x, y, size) {
+  explosions.push({
+    x: x, y: y,
+    size: size || 8 * PX,
+    timer: 0,
+    maxTime: 0.4,
+  });
+}
+
+// Controls
+let touches = {};
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (gameOver) { init(); return; }
+  if (!gameStarted) { gameStarted = true; return; }
+  for (const t of e.changedTouches) {
+    touches[t.identifier] = { x: t.clientX, y: t.clientY };
+    if (t.clientX < W() / 3) touchLeft = true;
+    else if (t.clientX > W() * 2 / 3) touchRight = true;
+    else firing = true;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  touchLeft = false;
+  touchRight = false;
+  for (const t of e.changedTouches) {
+    touches[t.identifier] = { x: t.clientX, y: t.clientY };
+  }
+  for (const id in touches) {
+    if (touches[id].x < W() / 3) touchLeft = true;
+    else if (touches[id].x > W() * 2 / 3) touchRight = true;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    delete touches[t.identifier];
+  }
+  touchLeft = false;
+  touchRight = false;
+  firing = false;
+  for (const id in touches) {
+    if (touches[id].x < W() / 3) touchLeft = true;
+    else if (touches[id].x > W() * 2 / 3) touchRight = true;
+  }
+}, { passive: false });
+
+// Keyboard
+const keys = {};
+window.addEventListener('keydown', (e) => {
+  keys[e.key] = true;
+  if (gameOver) { init(); return; }
+  if (!gameStarted) { gameStarted = true; }
+});
+window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+// Mouse (for desktop testing)
+let mouseDown = false;
+let mouseX = 0;
+canvas.addEventListener('mousedown', (e) => {
+  mouseDown = true;
+  mouseX = e.clientX;
+  if (gameOver) { init(); return; }
+  if (!gameStarted) { gameStarted = true; }
+});
+canvas.addEventListener('mousemove', (e) => { mouseX = e.clientX; });
+canvas.addEventListener('mouseup', () => { mouseDown = false; });
+
+function rectOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+let fireTimer = 0;
+
+function update(dt) {
+  if (!gameStarted || gameOver) return;
+
+  // Player respawn
+  if (player.dead) {
+    player.respawnTimer -= dt;
+    if (player.respawnTimer <= 0) {
+      player.dead = false;
+      player.x = W() / 2;
+      player.y = H() * 0.75;
+      player.invincible = 2.0;
+      fuel = 100;
+    }
+    return;
+  }
+
+  if (player.invincible > 0) player.invincible -= dt;
+
+  // Movement
+  const moveSpeed = 150 * PX / 4;
+  let dx = 0;
+  if (touchLeft || keys['ArrowLeft'] || keys['a']) dx = -1;
+  if (touchRight || keys['ArrowRight'] || keys['d']) dx = 1;
+  if (mouseDown) {
+    if (mouseX < W() / 3) dx = -1;
+    else if (mouseX > W() * 2 / 3) dx = 1;
+  }
+  player.x += dx * moveSpeed * dt;
+
+  // Clamp to river
+  const river = getRiverAt(scrollY + (H() - player.y));
+  const halfW = player.w / 2;
+  player.x = Math.max(river.left + halfW + PX, Math.min(river.right - halfW - PX, player.x));
+
+  // Bank collision
+  if (player.invincible <= 0) {
+    if (player.x - halfW < river.left + 2 * PX || player.x + halfW > river.right - 2 * PX) {
+      killPlayer();
+      return;
+    }
+  }
+
+  // Scroll
+  scrollY += scrollSpeed * dt;
+
+  // Fuel depletion
+  fuel -= (8 + level * 1.5) * dt;
+  if (fuel <= 0) {
+    fuel = 0;
+    killPlayer();
+    return;
+  }
+
+  // Fire bullets
+  fireTimer -= dt;
+  const wantFire = firing || keys[' '] || keys['ArrowUp'] || keys['w'] || mouseDown;
+  if (wantFire && fireTimer <= 0) {
+    bullets.push({
+      x: player.x - PX,
+      y: player.y - player.h / 2,
+      w: 2 * PX,
+      h: 4 * PX,
+    });
+    fireTimer = 0.15;
+    if (typeof SFX !== 'undefined') SFX.shoot();
+  }
+
+  // Update bullets
+  const bulletSpeed = 400 * PX / 4;
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    bullets[i].y -= bulletSpeed * dt;
+    if (bullets[i].y < -10) {
+      bullets.splice(i, 1);
+    }
+  }
+
+  // Update tank bullets
+  for (let i = tankBullets.length - 1; i >= 0; i--) {
+    const b = tankBullets[i];
+    b.x += b.dx * dt;
+    b.y += b.dy * dt;
+    if (b.y > H() + 20 || b.y < -20 || b.x < -20 || b.x > W() + 20) {
+      tankBullets.splice(i, 1);
+      continue;
+    }
+    // Hit player
+    if (player.invincible <= 0 && !player.dead) {
+      const pr = { x: player.x - player.w/2, y: player.y - player.h/2, w: player.w, h: player.h };
+      if (rectOverlap(b, pr)) {
+        tankBullets.splice(i, 1);
+        killPlayer();
+        return;
+      }
+    }
+  }
+
+  // Spawn logic
+  const viewTop = scrollY + H();
+  if (viewTop > nextSpawnY) {
+    // Spawn a cluster of enemies
+    const count = Math.min(1 + Math.floor(level / 2), 4);
+    for (let i = 0; i < count; i++) {
+      spawnEnemy(nextSpawnY + i * 80);
+    }
+    // Fuel depot every ~3 spawns
+    if (Math.random() < 0.35) {
+      spawnFuel(nextSpawnY + 40 + Math.random() * 100);
+    }
+    nextSpawnY += 200 + Math.random() * 150 - level * 5;
+  }
+
+  if (viewTop > nextBridgeY) {
+    spawnBridge(nextBridgeY);
+    nextBridgeY += 500 + Math.random() * 300 - level * 15;
+    sectionCount++;
+    if (sectionCount % 3 === 0) {
+      level = Math.min(level + 1, 20);
+      scrollSpeed = baseScrollSpeed + level * 8 * PX / 4;
+      if (typeof SFX !== 'undefined') SFX.levelUp();
+    }
+  }
+
+  // Update enemies
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    const screenY = H() - (e.worldY - scrollY);
+
+    // Remove off-screen (below view)
+    if (screenY > H() + 50) {
+      enemies.splice(i, 1);
+      continue;
+    }
+
+    // Movement
+    if (e.type === 'heli') {
+      e.x += e.dx * dt;
+      const r = getRiverAt(e.worldY);
+      if (e.x < r.left + 2 * PX) { e.x = r.left + 2 * PX; e.dx = Math.abs(e.dx); }
+      if (e.x + e.w > r.right - 2 * PX) { e.x = r.right - 2 * PX - e.w; e.dx = -Math.abs(e.dx); }
+      e.frame += dt * 8;
+    } else if (e.type === 'jet') {
+      e.worldY -= (e.dy || 0) * dt;
+    } else if (e.type === 'ship') {
+      e.x += e.dx * dt;
+      const r = getRiverAt(e.worldY);
+      if (e.x < r.left + PX) { e.x = r.left + PX; e.dx = Math.abs(e.dx); }
+      if (e.x + e.w > r.right - PX) { e.x = r.right - PX - e.w; e.dx = -Math.abs(e.dx); }
+    } else if (e.type === 'tank') {
+      // Tank shooting
+      if (screenY > 0 && screenY < H()) {
+        e.shootTimer -= dt;
+        if (e.shootTimer <= 0) {
+          e.shootTimer = 2 + Math.random() * 3 - level * 0.1;
+          // Shoot toward player
+          const angle = Math.atan2(player.y - screenY, player.x - (e.x + e.w/2));
+          const speed = 120 * PX / 4;
+          tankBullets.push({
+            x: e.x + e.w/2, y: screenY,
+            w: 2 * PX, h: 2 * PX,
+            dx: Math.cos(angle) * speed,
+            dy: Math.sin(angle) * speed,
+          });
+        }
+      }
+    }
+
+    // Bullet collision
+    for (let j = bullets.length - 1; j >= 0; j--) {
+      const br = { x: e.x, y: screenY, w: e.w, h: e.h };
+      if (rectOverlap(bullets[j], br)) {
+        bullets.splice(j, 1);
+        e.hp--;
+        if (e.hp <= 0) {
+          score += e.score;
+          addExplosion(e.x + e.w/2, screenY);
+          if (typeof SFX !== 'undefined') SFX.explosion();
+          enemies.splice(i, 1);
+        }
+        break;
+      }
+    }
+
+    // Player collision
+    if (player.invincible <= 0 && !player.dead && screenY > 0 && screenY < H()) {
+      const pr = { x: player.x - player.w/2, y: player.y - player.h/2, w: player.w, h: player.h };
+      const er = { x: e.x, y: screenY, w: e.w, h: e.h };
+      if (rectOverlap(pr, er)) {
+        addExplosion(e.x + e.w/2, screenY);
+        enemies.splice(i, 1);
+        killPlayer();
+        return;
+      }
+    }
+  }
+
+  // Update fuel depots
+  for (let i = fuelDepots.length - 1; i >= 0; i--) {
+    const f = fuelDepots[i];
+    const screenY = H() - (f.worldY - scrollY);
+    if (screenY > H() + 50) { fuelDepots.splice(i, 1); continue; }
+    if (!f.alive) continue;
+
+    // Bullet hits fuel depot — destroy it
+    for (let j = bullets.length - 1; j >= 0; j--) {
+      const fr = { x: f.x, y: screenY, w: f.w, h: f.h };
+      if (rectOverlap(bullets[j], fr)) {
+        bullets.splice(j, 1);
+        f.alive = false;
+        score += 80;
+        addExplosion(f.x + f.w/2, screenY);
+        if (typeof SFX !== 'undefined') SFX.explosion();
+        break;
+      }
+    }
+
+    // Player flies over fuel depot — refuel
+    if (f.alive && !player.dead) {
+      const pr = { x: player.x - player.w/2, y: player.y - player.h/2, w: player.w, h: player.h };
+      const fr = { x: f.x, y: screenY, w: f.w, h: f.h };
+      if (rectOverlap(pr, fr)) {
+        fuel = Math.min(100, fuel + 30);
+        f.alive = false;
+        if (typeof SFX !== 'undefined') SFX.powerUp();
+      }
+    }
+  }
+
+  // Update bridges
+  for (let i = bridges.length - 1; i >= 0; i--) {
+    const b = bridges[i];
+    const screenY = H() - (b.worldY - scrollY);
+    if (screenY > H() + 50) { bridges.splice(i, 1); continue; }
+    if (!b.alive) continue;
+
+    // Recalculate bridge edges based on current river
+    const r = getRiverAt(b.worldY);
+    b.left = r.left;
+    b.right = r.right;
+
+    // Bullet hits bridge
+    for (let j = bullets.length - 1; j >= 0; j--) {
+      const br = { x: b.left, y: screenY, w: b.right - b.left, h: b.h };
+      if (rectOverlap(bullets[j], br)) {
+        bullets.splice(j, 1);
+        b.hp--;
+        if (typeof SFX !== 'undefined') SFX.brickHit();
+        if (b.hp <= 0) {
+          b.alive = false;
+          score += 500;
+          addExplosion((b.left + b.right) / 2, screenY, 12 * PX);
+          if (typeof SFX !== 'undefined') SFX.bigExplosion();
+        }
+        break;
+      }
+    }
+
+    // Player hits bridge — die
+    if (b.alive && player.invincible <= 0 && !player.dead) {
+      const pr = { x: player.x - player.w/2, y: player.y - player.h/2, w: player.w, h: player.h };
+      const br = { x: b.left, y: screenY, w: b.right - b.left, h: b.h };
+      if (rectOverlap(pr, br)) {
+        killPlayer();
+        return;
+      }
+    }
+  }
+
+  // Update explosions
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    explosions[i].timer += dt;
+    if (explosions[i].timer >= explosions[i].maxTime) {
+      explosions.splice(i, 1);
+    }
+  }
+}
+
+function killPlayer() {
+  if (player.dead) return;
+  player.dead = true;
+  addExplosion(player.x, player.y, 12 * PX);
+  if (typeof SFX !== 'undefined') SFX.bigExplosion();
+  lives--;
+  if (lives <= 0) {
+    gameOver = true;
+    if (typeof SFX !== 'undefined') SFX.gameOver();
+  } else {
+    player.respawnTimer = 1.5;
+  }
+}
+
+function drawPixelRect(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.floor(x), Math.floor(y), Math.ceil(w), Math.ceil(h));
+}
+
+function draw() {
+  const w = W(), h = H();
+  ctx.fillStyle = COL_BG;
+  ctx.fillRect(0, 0, w, h);
+
+  // Draw river and banks
+  for (let sy = 0; sy < h; sy += PX) {
+    const worldY = scrollY + (h - sy);
+    const r = getRiverAt(worldY);
+
+    // Left bank
+    const bankStripe = (Math.floor(worldY / (PX * 6)) % 2 === 0);
+    ctx.fillStyle = bankStripe ? COL_BANK : COL_BANK_ALT;
+    ctx.fillRect(0, sy, Math.ceil(r.left), PX);
+
+    // River
+    ctx.fillStyle = COL_RIVER;
+    ctx.fillRect(Math.floor(r.left), sy, Math.ceil(r.right - r.left), PX);
+
+    // Right bank
+    ctx.fillStyle = bankStripe ? COL_BANK : COL_BANK_ALT;
+    ctx.fillRect(Math.floor(r.right), sy, w - Math.floor(r.right), PX);
+  }
+
+  // Draw bridges
+  for (const b of bridges) {
+    if (!b.alive) continue;
+    const sy = h - (b.worldY - scrollY);
+    if (sy < -20 || sy > h + 20) continue;
+    const color = b.hp <= 1 ? COL_BRIDGE_D : COL_BRIDGE;
+    drawPixelRect(b.left - 2 * PX, sy, b.right - b.left + 4 * PX, b.h, color);
+    // Bridge stripes
+    ctx.fillStyle = '#555555';
+    for (let bx = Math.floor(b.left); bx < b.right; bx += 4 * PX) {
+      ctx.fillRect(bx, sy + PX, 2 * PX, PX);
+    }
+  }
+
+  // Draw fuel depots
+  for (const f of fuelDepots) {
+    if (!f.alive) continue;
+    const sy = h - (f.worldY - scrollY);
+    if (sy < -20 || sy > h + 20) continue;
+    drawPixelRect(f.x, sy, f.w, f.h, COL_FUEL);
+    // "F" label
+    drawPixelRect(f.x + PX, sy + PX, PX, 3 * PX, COL_FUEL_LBL);
+    drawPixelRect(f.x + 2 * PX, sy + PX, 2 * PX, PX, COL_FUEL_LBL);
+    drawPixelRect(f.x + 2 * PX, sy + 2 * PX, PX, PX, COL_FUEL_LBL);
+  }
+
+  // Draw enemies
+  for (const e of enemies) {
+    const sy = h - (e.worldY - scrollY);
+    if (sy < -20 || sy > h + 20) continue;
+
+    if (e.type === 'heli') {
+      // Body
+      drawPixelRect(e.x + PX, sy, 5 * PX, 3 * PX, COL_HELI);
+      // Rotor (alternating)
+      const rotorOff = (Math.floor(e.frame) % 2) * PX;
+      drawPixelRect(e.x + rotorOff, sy - PX, 5 * PX, PX, COL_HELI);
+      // Tail
+      drawPixelRect(e.x, sy + PX, PX, 2 * PX, COL_HELI);
+    } else if (e.type === 'jet') {
+      // Fuselage
+      drawPixelRect(e.x + 2 * PX, sy, PX, 6 * PX, COL_JET);
+      // Wings
+      drawPixelRect(e.x, sy + 2 * PX, 5 * PX, 2 * PX, COL_JET);
+      // Tail
+      drawPixelRect(e.x + PX, sy + 5 * PX, 3 * PX, PX, COL_JET);
+    } else if (e.type === 'tank') {
+      // Body
+      drawPixelRect(e.x, sy, 6 * PX, 3 * PX, COL_TANK);
+      // Turret
+      drawPixelRect(e.x + 2 * PX, sy - PX, 2 * PX, PX, COL_TANK_GUN);
+      // Gun barrel
+      const gx = e.onLeft ? e.x + 4 * PX : e.x - PX;
+      drawPixelRect(gx, sy, PX, PX, COL_TANK_GUN);
+    } else if (e.type === 'ship') {
+      // Hull
+      drawPixelRect(e.x + PX, sy + 2 * PX, 4 * PX, 2 * PX, COL_SHIP);
+      // Upper
+      drawPixelRect(e.x + 2 * PX, sy, 2 * PX, 2 * PX, '#888888');
+      // Mast
+      drawPixelRect(e.x + 3 * PX, sy - PX, PX, PX, '#AAAAAA');
+    }
+  }
+
+  // Draw bullets
+  ctx.fillStyle = COL_BULLET;
+  for (const b of bullets) {
+    ctx.fillRect(Math.floor(b.x), Math.floor(b.y), b.w, b.h);
+  }
+
+  // Draw tank bullets
+  ctx.fillStyle = COL_ENEMY_BUL;
+  for (const b of tankBullets) {
+    ctx.fillRect(Math.floor(b.x), Math.floor(b.y), b.w, b.h);
+  }
+
+  // Draw player
+  if (!player.dead) {
+    const blink = player.invincible > 0 && Math.floor(player.invincible * 10) % 2 === 0;
+    if (!blink) {
+      const px = Math.floor(player.x - player.w / 2);
+      const py = Math.floor(player.y - player.h / 2);
+      // Fuselage
+      drawPixelRect(px + 3 * PX, py, 2 * PX, 7 * PX, COL_PLANE_W);
+      // Nose
+      drawPixelRect(px + 3 * PX, py, 2 * PX, 2 * PX, COL_PLANE_R);
+      // Wings
+      drawPixelRect(px, py + 3 * PX, 8 * PX, 2 * PX, COL_PLANE_W);
+      // Wing tips
+      drawPixelRect(px, py + 3 * PX, PX, PX, COL_PLANE_R);
+      drawPixelRect(px + 7 * PX, py + 3 * PX, PX, PX, COL_PLANE_R);
+      // Tail
+      drawPixelRect(px + 2 * PX, py + 6 * PX, 4 * PX, 2 * PX, COL_PLANE_W);
+      drawPixelRect(px + PX, py + 7 * PX, PX, PX, COL_PLANE_R);
+      drawPixelRect(px + 6 * PX, py + 7 * PX, PX, PX, COL_PLANE_R);
+    }
+  }
+
+  // Draw explosions
+  for (const ex of explosions) {
+    const t = ex.timer / ex.maxTime;
+    const r = ex.size * (0.3 + t * 0.7);
+    const alpha = 1 - t;
+    if (t < 0.3) {
+      drawPixelRect(ex.x - r/2, ex.y - r/2, r, r, '#FFFFCC');
+    } else if (t < 0.6) {
+      drawPixelRect(ex.x - r/2, ex.y - r/2, r, r, COL_EXPLODE);
+    } else {
+      drawPixelRect(ex.x - r/2, ex.y - r/2, r, r, '#CC2200');
+    }
+    // Chunky debris pixels
+    for (let d = 0; d < 4; d++) {
+      const angle = (d / 4) * Math.PI * 2 + t * 3;
+      const dist = r * 0.6 * t;
+      ctx.fillStyle = d % 2 === 0 ? '#FFCC00' : '#FF4400';
+      ctx.fillRect(
+        Math.floor(ex.x + Math.cos(angle) * dist),
+        Math.floor(ex.y + Math.sin(angle) * dist),
+        PX, PX
+      );
+    }
+  }
+
+  // Subtle scanlines
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  for (let sy = 0; sy < h; sy += 2) {
+    ctx.fillRect(0, sy, w, 1);
+  }
+
+  // HUD — top bar
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, w, 12 * PX);
+
+  // Score
+  drawText('SCORE ' + String(score).padStart(6, '0'), 2 * PX, 2 * PX, COL_SCORE, PX);
+
+  // Lives
+  const livesStr = 'LIVES ' + String(lives);
+  drawText(livesStr, w / 2 - textWidth(livesStr, PX) / 2, 2 * PX, COL_SCORE, PX);
+
+  // Level
+  const lvlStr = 'SEC ' + String(sectionCount);
+  drawText(lvlStr, w - textWidth(lvlStr, PX) - 2 * PX, 2 * PX, COL_SCORE, PX);
+
+  // Fuel bar
+  const fuelBarX = 2 * PX;
+  const fuelBarY = 8 * PX;
+  const fuelBarW = w - 4 * PX;
+  const fuelBarH = 3 * PX;
+  ctx.fillStyle = '#222222';
+  ctx.fillRect(fuelBarX, fuelBarY, fuelBarW, fuelBarH);
+  const fuelColor = fuel > 25 ? COL_FUEL_BAR : COL_FUEL_LOW;
+  ctx.fillStyle = fuelColor;
+  ctx.fillRect(fuelBarX, fuelBarY, fuelBarW * fuel / 100, fuelBarH);
+  // "F" label on fuel bar
+  drawChar('F', fuelBarX + PX, fuelBarY, '#000000', Math.max(1, PX - 1));
+
+  // Title / game over screens
+  if (!gameStarted) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, w, h);
+
+    const titleScale = PX * 2;
+    const title = 'RIVER RAID';
+    const tw = textWidth(title, titleScale);
+    drawText(title, (w - tw) / 2, h * 0.25, '#FFFFFF', titleScale);
+
+    const sub1 = '1982 ACTIVISION';
+    drawText(sub1, (w - textWidth(sub1, PX)) / 2, h * 0.25 + titleScale * 8, COL_RIVER, PX);
+
+    const instrScale = PX;
+    const lines = [
+      'LEFT SIDE - MOVE LEFT',
+      'RIGHT SIDE - MOVE RIGHT',
+      'CENTER - FIRE',
+      '',
+      'DESTROY BRIDGES TO PASS',
+      'FLY OVER FUEL DEPOTS',
+      'AVOID BANKS AND ENEMIES',
+    ];
+    for (let i = 0; i < lines.length; i++) {
+      const lw = textWidth(lines[i], instrScale);
+      drawText(lines[i], (w - lw) / 2, h * 0.45 + i * instrScale * 7, '#AAAAAA', instrScale);
+    }
+
+    const tapStr = 'TAP TO START';
+    const tapW = textWidth(tapStr, PX);
+    const blink = Math.floor(performance.now() / 500) % 2;
+    if (blink) drawText(tapStr, (w - tapW) / 2, h * 0.85, '#FFFFFF', PX);
+  }
+
+  if (gameOver) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, w, h);
+
+    const goScale = PX * 2;
+    const goStr = 'GAME OVER';
+    drawText(goStr, (w - textWidth(goStr, goScale)) / 2, h * 0.3, '#CC2222', goScale);
+
+    const scoreStr = 'SCORE ' + String(score);
+    drawText(scoreStr, (w - textWidth(scoreStr, PX)) / 2, h * 0.5, '#FFFFFF', PX);
+
+    const secStr = 'SECTIONS ' + String(sectionCount);
+    drawText(secStr, (w - textWidth(secStr, PX)) / 2, h * 0.5 + PX * 8, '#AAAAAA', PX);
+
+    const tapStr = 'TAP TO RESTART';
+    const blink = Math.floor(performance.now() / 500) % 2;
+    if (blink) drawText(tapStr, (w - textWidth(tapStr, PX)) / 2, h * 0.75, '#FFFFFF', PX);
+  }
+}
+
+function gameLoop(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  update(dt);
+  draw();
+
+  requestAnimationFrame(gameLoop);
+}
+
+init();
+
+function start() {
+  if (window._gameReady) {
+    lastTime = performance.now();
+    requestAnimationFrame(gameLoop);
+  } else {
+    window.addEventListener('gameready', () => {
+      lastTime = performance.now();
+      requestAnimationFrame(gameLoop);
+    });
+  }
+}
+
+start();
+</script>
+</body></html>

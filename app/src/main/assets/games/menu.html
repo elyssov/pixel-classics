@@ -444,7 +444,7 @@
       <div class="nc-panel-header">C:\GAMES</div>
       <div class="nc-panel-cols"><span>Name</span><span>Size</span><span>Date</span></div>
       <div class="nc-panel-body" id="left-panel"></div>
-      <div class="nc-panel-footer" id="left-footer">GAMES: 9 files, 2,048K</div>
+      <div class="nc-panel-footer" id="left-footer">GAMES: 13 files, 4,096K</div>
     </div>
 
     <!-- Right Panel: C:\ (decorative) -->
@@ -458,7 +458,7 @@
 
   <!-- Status -->
   <div class="nc-status">
-    <span>C:\GAMES\ v1.1</span>
+    <span>C:\GAMES\ v2.0</span>
     <span><span class="sync">&#9679;</span> Score sync &mdash; 0 nearby</span>
     <span id="nc-clock"></span>
   </div>
@@ -490,6 +490,10 @@ const games = [
   { name: "ARKANOID", ext: "EXE", size: "96,256",  date: "04-17-86", file: "arkanoid.html" },
   { name: "MINESW",   ext: "EXE", size: "24,576",  date: "10-08-90", file: "minesweeper.html" },
   { name: "DIGGER",   ext: "EXE", size: "72,448",  date: "04-15-83", file: "digger.html" },
+  { name: "PITFALL",  ext: "EXE", size: "131,072", date: "07-20-82", file: "pitfall.html" },
+  { name: "RIVERAID", ext: "EXE", size: "48,128",  date: "11-10-82", file: "river_raid.html" },
+  { name: "FROGGER",  ext: "EXE", size: "32,256",  date: "09-05-81", file: "frogger.html" },
+  { name: "ET",       ext: "EXE", size: "8,192",   date: "12-01-82", file: "et.html" },
 ];
 
 // ═══ C:\ ROOT (decorative) ═══
@@ -711,8 +715,8 @@ function updateClock() {
 }
 
 // ═══ FOTA — Over-the-Air Update from GitHub Releases ═══
-const CURRENT_VERSION = '1.1';
-const CURRENT_BUILD = 5;
+const CURRENT_VERSION = '2.0';
+const CURRENT_BUILD = 6;
 const GITHUB_REPO = 'elyssov/pixel-classics';
 
 function checkForUpdate() {

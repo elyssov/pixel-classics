@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>E.T. The Extra-Terrestrial</title>
+<style>
+  * { margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { background: #3a2a1a; overflow: hidden; touch-action: none; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; image-rendering: pixelated; }
+</style>
+</head><body>
+<canvas id="c"></canvas>
+<script src="sound.js"></script>
+<script src="loader.js"></script>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// ============================================
+// E.T. THE EXTRA-TERRESTRIAL
+// "Rated: Worst Game Ever Made (1982-Infinity)"
+// A love letter to terrible game design
+// ============================================
+
+const PX = 8; // our "atari pixel" size
+
+// Authentic Atari 2600 ugly palette
+const C = {
+  brown:    '#6b4226',
+  dkBrown:  '#3a2a1a',
+  green:    '#4a7a2e',
+  dkGreen:  '#2a5a0e',
+  gray:     '#7a7a7a',
+  dkGray:   '#4a4a4a',
+  blue:     '#2a4a8a',
+  white:    '#c8c8c8',
+  black:    '#1a1a1a',
+  yellow:   '#b8a828',
+  red:      '#aa3333',
+  pink:     '#c87a7a',
+  orange:   '#b86a2a',
+  etGreen:  '#5a8a3a',
+  etHead:   '#7aaa4a',
+  candy:    '#d8a030',
+  pit:      '#2a1a0a',
+  sky:      '#1a2a4a',
+  phone:    '#e8e838',
+};
+
+let W, H, GW, GH; // canvas and grid dimensions
+
+// Game states
+const STATE = { TITLE: 0, PLAY: 1, PIT: 2, CAUGHT: 3, CALL: 4, WIN: 5, DEAD: 6 };
+let state = STATE.TITLE;
+
+// Zones: 0=forest, 1=pit_zone_1, 2=city, 3=pit_zone_2, 4=landing, 5=pit_zone_3
+const ZONE_NAMES = ['Forest', 'Wasteland', 'City', 'Desert', 'Landing Zone', 'The Void'];
+const ZONE_COLORS = [
+  { bg: C.dkGreen, fg: C.green },      // forest
+  { bg: C.dkBrown, fg: C.brown },       // wasteland (pits)
+  { bg: C.dkGray,  fg: C.gray },        // city
+  { bg: C.brown,   fg: C.orange },      // desert (pits)
+  { bg: C.sky,     fg: C.blue },        // landing
+  { bg: C.black,   fg: C.dkBrown },     // the void (pits)
+];
+
+// Zone pit layouts — each pit is {x, y} in grid coords
+// Pits are in zones 1, 3, 5
+const ZONE_PITS = {
+  1: [], 3: [], 5: []
+};
+
+let et, fbi, scientist;
+let phonePieces = [];   // {zone, x, y, collected}
+let candies = [];       // {zone, x, y, active}
+let currentZone = 0;
+let energy = 100;
+let timer = 99;
+let timerAccum = 0;
+let score = 0;
+let pitFalls = 0;
+let elliottRevives = 3;
+let inPit = false;
+let pitY = 0;           // how deep in pit
+let neckExtended = false;
+let levitating = false;
+let inputDelay = 0;     // intentional terrible input lag
+let pendingDir = null;
+let tips = [];
+let tipTimer = 0;
+let currentTip = '';
+let msgTimer = 0;
+let currentMsg = '';
+let flashTimer = 0;
+let titleBlink = 0;
+let caughtTimer = 0;
+let caughtBy = '';
+let callTimer = 0;
+let shipY = -20;
+let winTimer = 0;
+
+const TIPS = [
+  "Tip: Try not falling in the pit",
+  "Tip: The game gets easier after you stop playing",
+  "Tip: This game was made in 5 weeks. It shows.",
+  "Tip: The pits are a feature, not a bug",
+  "Tip: E.T. phone home. E.T. fall in hole.",
+  "Tip: 3.5 million copies were buried in a landfill",
+  "Tip: You paid $49.95 for this in 1982",
+  "Tip: The developer cried too",
+  "Tip: Have you tried NOT playing?",
+  "Tip: Somewhere, an Atari exec is still sorry",
+];
+
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W;
+  canvas.height = H;
+  GW = Math.floor(W / PX);
+  GH = Math.floor(H / PX);
+}
+
+function generateLevel() {
+  currentZone = 0;
+  energy = 100;
+  timer = 99;
+  timerAccum = 0;
+  pitFalls = 0;
+  inPit = false;
+  levitating = false;
+  neckExtended = false;
+  score = 0;
+  elliottRevives = 3;
+
+  et = { x: Math.floor(GW/2), y: Math.floor(GH/2), dx: 0, dy: 0 };
+  fbi = { x: 5, y: 5, zone: 2, dx: 0, dy: 0, moveTimer: 0 };
+  scientist = { x: GW - 8, y: GH - 8, zone: 0, dx: 0, dy: 0, moveTimer: 0 };
+
+  // Place phone pieces in 3 different zones
+  phonePieces = [
+    { zone: 1, x: randInt(4, GW-6), y: randInt(6, GH-8), collected: false },
+    { zone: 3, x: randInt(4, GW-6), y: randInt(6, GH-8), collected: false },
+    { zone: 5, x: randInt(4, GW-6), y: randInt(6, GH-8), collected: false },
+  ];
+
+  // Generate pits in pit zones — near phone pieces, naturally
+  for (let z of [1, 3, 5]) {
+    ZONE_PITS[z] = [];
+    for (let i = 0; i < 4 + randInt(0,3); i++) {
+      ZONE_PITS[z].push({
+        x: randInt(3, GW-8),
+        y: randInt(6, GH-10),
+        w: 4 + randInt(0,3),
+        h: 3 + randInt(0,2)
+      });
+    }
+  }
+
+  // Scatter candies
+  candies = [];
+  for (let z = 0; z < 6; z++) {
+    for (let i = 0; i < 2; i++) {
+      candies.push({ zone: z, x: randInt(3, GW-5), y: randInt(6, GH-6), active: true });
+    }
+  }
+
+  tipTimer = 300;
+  currentTip = TIPS[randInt(0, TIPS.length-1)];
+}
+
+function randInt(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+
+// ===== DRAWING =====
+
+function drawPixel(x, y, color, w, h) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x * PX, y * PX, (w||1) * PX, (h||1) * PX);
+}
+
+function drawText(text, cx, cy, color, size) {
+  ctx.fillStyle = color || C.white;
+  ctx.font = (size || 16) + 'px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, cx, cy);
+}
+
+function drawBlockText(text, x, y, color, scale) {
+  // Ultra blocky pixel font — just use canvas font but make it chunky
+  ctx.fillStyle = color || C.white;
+  ctx.font = 'bold ' + (scale || 14) + 'px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, x, y);
+}
+
+function drawZone() {
+  let zc = ZONE_COLORS[currentZone];
+
+  // Fill background — solid ugly color
+  ctx.fillStyle = zc.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw some "terrain" blocks
+  for (let x = 0; x < GW; x += 3) {
+    for (let y = 4; y < GH; y += 4) {
+      if ((x + y + currentZone) % 7 < 2) {
+        drawPixel(x, y, zc.fg, 2, 1);
+      }
+    }
+  }
+
+  // Draw zone header bar
+  ctx.fillStyle = C.black;
+  ctx.fillRect(0, 0, W, PX * 4);
+  drawBlockText(ZONE_NAMES[currentZone], W/2, PX * 2.5, zc.fg, 12);
+
+  // Draw pits (barely visible — that's the point)
+  if (ZONE_PITS[currentZone]) {
+    for (let p of ZONE_PITS[currentZone]) {
+      // Pit is only SLIGHTLY darker than background. Infuriating.
+      let pitColor = currentZone === 1 ? '#3520158c' :
+                     currentZone === 3 ? '#5a3a1a8c' : '#0a0a0a8c';
+      drawPixel(p.x, p.y, pitColor, p.w, p.h);
+    }
+  }
+}
+
+function drawET() {
+  if (inPit) {
+    // Draw E.T. in pit — just head poking out
+    let pitDrawY = et.y - 2 + pitY;
+    // Body in pit (barely visible)
+    drawPixel(et.x, pitDrawY + 2, C.etGreen, 3, 4);
+    // Head
+    drawPixel(et.x + 1, pitDrawY + (neckExtended ? -1 : 1), C.etHead, 1, 1);
+    // Neck extending animation
+    if (neckExtended) {
+      drawPixel(et.x + 1, pitDrawY, C.etGreen, 1, 2);
+    }
+    // Levitation sparkle
+    if (levitating && Math.random() > 0.5) {
+      drawPixel(et.x + randInt(-1,3), pitDrawY + randInt(-2,0), C.yellow, 1, 1);
+    }
+    return;
+  }
+
+  // E.T.: a green/brown rectangle. Barely recognizable.
+  // Body (3x4 pixels)
+  drawPixel(et.x, et.y, C.etGreen, 3, 4);
+  // Head (1x1 dot on top)
+  drawPixel(et.x + 1, et.y - 1, C.etHead, 1, 1);
+  // "Eyes" (single dark pixel)
+  if (flashTimer % 30 < 20) {
+    drawPixel(et.x + 1, et.y - 1, C.dkGreen, 1, 1);
+    drawPixel(et.x + 1, et.y - 1, C.etHead, 1, 1); // flicker
+  }
+  // Neck extended
+  if (neckExtended) {
+    drawPixel(et.x + 1, et.y - 2, C.etGreen, 1, 1);
+    drawPixel(et.x + 1, et.y - 3, C.etHead, 1, 1);
+  }
+  // Arms (tiny stumps)
+  drawPixel(et.x - 1, et.y + 1, C.etGreen, 1, 1);
+  drawPixel(et.x + 3, et.y + 1, C.etGreen, 1, 1);
+}
+
+function drawFBI() {
+  if (fbi.zone !== currentZone) return;
+  // Blue rectangle. That's it. That's the FBI.
+  drawPixel(fbi.x, fbi.y, C.blue, 2, 4);
+  drawPixel(fbi.x, fbi.y - 1, '#4a4aaa', 2, 1); // "hat"
+}
+
+function drawScientist() {
+  if (scientist.zone !== currentZone) return;
+  // White rectangle. Science!
+  drawPixel(scientist.x, scientist.y, C.white, 2, 4);
+  drawPixel(scientist.x, scientist.y - 1, C.white, 2, 1); // "head"
+  // Clipboard (tiny brown pixel)
+  drawPixel(scientist.x + 2, scientist.y + 1, C.brown, 1, 1);
+}
+
+function drawPhonePieces() {
+  for (let p of phonePieces) {
+    if (p.collected || p.zone !== currentZone) continue;
+    // Tiny flickering dot — impossible to see, as intended
+    if (Math.random() > 0.3) {
+      drawPixel(p.x, p.y, C.phone, 1, 1);
+    }
+  }
+}
+
+function drawCandies() {
+  for (let c of candies) {
+    if (!c.active || c.zone !== currentZone) continue;
+    drawPixel(c.x, c.y, C.candy, 1, 1);
+    // Tiny sparkle
+    if (flashTimer % 20 < 10) {
+      drawPixel(c.x, c.y - 1, '#ffffff44', 1, 1);
+    }
+  }
+}
+
+function drawHUD() {
+  // Energy bar
+  ctx.fillStyle = C.black;
+  ctx.fillRect(0, H - PX * 3, W, PX * 3);
+
+  drawBlockText('NRG:', PX * 4, H - PX * 1, C.white, 10);
+  let ew = Math.max(0, energy);
+  ctx.fillStyle = energy > 30 ? C.green : C.red;
+  ctx.fillRect(PX * 7, H - PX * 2.5, (ew / 100) * (W * 0.3), PX * 1.5);
+  ctx.strokeStyle = C.gray;
+  ctx.strokeRect(PX * 7, H - PX * 2.5, W * 0.3, PX * 1.5);
+
+  // Timer
+  drawBlockText('TIME: ' + Math.ceil(timer), W - PX * 10, H - PX * 1, C.yellow, 10);
+
+  // Phone pieces collected
+  let collected = phonePieces.filter(p => p.collected).length;
+  drawBlockText('PHONE: ' + collected + '/3', W / 2, H - PX * 1, C.phone, 10);
+
+  // Elliott revives
+  drawBlockText('ELLIOTT: ' + elliottRevives, W / 2 + PX * 15, H - PX * 1, C.pink, 10);
+
+  // Score
+  drawBlockText('SCORE: ' + score, PX * 4, PX * 3.5, C.yellow, 10);
+
+  // Zone arrows
+  drawBlockText('<', PX, H / 2 / PX * PX, C.white, 14);
+  drawBlockText('>', W - PX, H / 2 / PX * PX, C.white, 14);
+}
+
+function drawTip() {
+  if (tipTimer > 0) {
+    let alpha = Math.min(1, tipTimer / 60);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#000000aa';
+    ctx.fillRect(W * 0.1, H * 0.7, W * 0.8, PX * 3);
+    drawBlockText(currentTip, W/2, H * 0.7 + PX * 2, C.yellow, 11);
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawMessage() {
+  if (msgTimer > 0) {
+    ctx.fillStyle = '#000000cc';
+    ctx.fillRect(W * 0.1, H * 0.4, W * 0.8, PX * 4);
+    drawBlockText(currentMsg, W/2, H * 0.4 + PX * 2.5, C.white, 13);
+  }
+}
+
+function drawShip() {
+  if (state === STATE.CALL || state === STATE.WIN) {
+    // Spaceship — a triangle-ish collection of blocks
+    let sx = Math.floor(GW / 2) - 4;
+    drawPixel(sx + 3, shipY, C.gray, 3, 1);
+    drawPixel(sx + 1, shipY + 1, C.gray, 7, 1);
+    drawPixel(sx, shipY + 2, C.gray, 9, 1);
+    drawPixel(sx + 2, shipY + 3, C.blue, 5, 1);
+    // Lights
+    if (flashTimer % 10 < 5) {
+      drawPixel(sx + 2, shipY + 1, C.red, 1, 1);
+      drawPixel(sx + 6, shipY + 1, C.yellow, 1, 1);
+    }
+  }
+}
+
+// ===== TITLE SCREEN =====
+function drawTitle() {
+  ctx.fillStyle = C.black;
+  ctx.fillRect(0, 0, W, H);
+
+  titleBlink++;
+
+  // Stars
+  for (let i = 0; i < 40; i++) {
+    let sx = ((i * 137 + titleBlink) % GW);
+    let sy = ((i * 89) % GH);
+    if (Math.random() > 0.1)
+      drawPixel(sx, sy, C.white, 1, 1);
+  }
+
+  // E.T. big blocky sprite in center
+  let cx = Math.floor(GW/2) - 5;
+  let cy = Math.floor(GH/2) - 6;
+  // Body
+  for (let dy = 0; dy < 8; dy++) {
+    for (let dx = 0; dx < 6; dx++) {
+      if (dx >= 1 && dx <= 4) drawPixel(cx+dx, cy+dy+3, C.etGreen, 1, 1);
+    }
+  }
+  // Head
+  drawPixel(cx+2, cy+1, C.etHead, 2, 2);
+  // Neck
+  drawPixel(cx+2, cy+3, C.etGreen, 2, 1);
+  // "Eyes"
+  if (titleBlink % 60 < 50) {
+    drawPixel(cx+2, cy+2, C.black, 1, 1);
+    drawPixel(cx+3, cy+2, C.black, 1, 1);
+  }
+  // Arms
+  drawPixel(cx, cy+5, C.etGreen, 1, 2);
+  drawPixel(cx+5, cy+5, C.etGreen, 1, 2);
+  // Finger (the iconic glowing finger)
+  if (titleBlink % 40 < 30) {
+    drawPixel(cx+6, cy+5, C.red, 1, 1);
+  }
+
+  drawBlockText('E.T.', W/2, PX * 4, C.green, 28);
+  drawBlockText('THE EXTRA-TERRESTRIAL', W/2, PX * 7, C.etGreen, 14);
+
+  if (titleBlink % 80 < 60) {
+    drawBlockText('Rated: Worst Game Ever Made (1982-\u221E)', W/2, PX * 10, C.yellow, 10);
+  }
+
+  drawBlockText('"I need to phone home"', W/2, H - PX * 12, C.gray, 10);
+
+  if (titleBlink % 60 < 40) {
+    drawBlockText('TAP TO START YOUR SUFFERING', W/2, H - PX * 6, C.white, 12);
+  }
+
+  drawBlockText('SWIPE/TAP: Move | TAP E.T.: Extend Neck', W/2, H - PX * 3, C.gray, 9);
+}
+
+// ===== GAME OVER =====
+function drawGameOver() {
+  ctx.fillStyle = C.black;
+  ctx.fillRect(0, 0, W, H);
+
+  drawBlockText('GAME OVER', W/2, H * 0.25, C.red, 24);
+  drawBlockText('E.T. phoned home.', W/2, H * 0.4, C.gray, 14);
+  drawBlockText('Nobody answered.', W/2, H * 0.48, C.gray, 14);
+
+  // Grave
+  let gx = Math.floor(GW/2) - 3;
+  let gy = Math.floor(GH * 0.65);
+  drawPixel(gx, gy, C.gray, 6, 1);
+  drawPixel(gx+1, gy-4, C.gray, 4, 4);
+  drawPixel(gx+2, gy-3, C.dkGray, 2, 2);
+  // Cross on grave
+  drawPixel(gx+2, gy-5, C.gray, 2, 1);
+  drawPixel(gx+3, gy-6, C.gray, 1, 1);
+
+  drawBlockText('Buried in Alamogordo, NM', W/2, H * 0.78, C.brown, 11);
+  drawBlockText('Score: ' + score, W/2, H * 0.84, C.yellow, 14);
+  drawBlockText('Pit falls: ' + pitFalls, W/2, H * 0.89, C.orange, 10);
+
+  if (titleBlink % 60 < 40) {
+    drawBlockText('TAP TO TRY AGAIN (WHY?)', W/2, H * 0.95, C.white, 11);
+  }
+  titleBlink++;
+}
+
+// ===== WIN SCREEN =====
+function drawWinScreen() {
+  ctx.fillStyle = C.sky;
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars
+  for (let i = 0; i < 60; i++) {
+    let sx = ((i * 137 + winTimer) % GW);
+    let sy = ((i * 89) % (GH - 10));
+    drawPixel(sx, sy, C.white, 1, 1);
+  }
+
+  // Ship flying away
+  let sy2 = Math.max(-10, Math.floor(GH * 0.3) - winTimer / 3);
+  let sx2 = Math.floor(GW/2) - 4;
+  drawPixel(sx2+3, sy2, C.gray, 3, 1);
+  drawPixel(sx2+1, sy2+1, C.gray, 7, 1);
+  drawPixel(sx2, sy2+2, C.gray, 9, 1);
+
+  drawBlockText('Congratulations!', W/2, H * 0.5, C.green, 20);
+  drawBlockText('You beat the worst game ever made.', W/2, H * 0.6, C.white, 12);
+  drawBlockText('You are now qualified for anything.', W/2, H * 0.67, C.yellow, 12);
+  drawBlockText('Score: ' + score + ' (it doesn\'t matter)', W/2, H * 0.76, C.gray, 11);
+
+  if (winTimer > 120 && titleBlink % 60 < 40) {
+    drawBlockText('TAP TO PLAY AGAIN (DON\'T)', W/2, H * 0.88, C.white, 11);
+  }
+  titleBlink++;
+  winTimer++;
+}
+
+// ===== UPDATE =====
+
+function showMessage(msg, dur) {
+  currentMsg = msg;
+  msgTimer = dur || 120;
+}
+
+function showTip() {
+  currentTip = TIPS[randInt(0, TIPS.length - 1)];
+  tipTimer = 180;
+}
+
+function checkPitCollision() {
+  if (!ZONE_PITS[currentZone]) return false;
+  for (let p of ZONE_PITS[currentZone]) {
+    if (et.x + 2 >= p.x && et.x <= p.x + p.w &&
+        et.y + 3 >= p.y && et.y <= p.y + p.h) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function fallInPit() {
+  inPit = true;
+  pitY = 0;
+  levitating = false;
+  neckExtended = false;
+  pitFalls++;
+  energy -= 5; // falling costs energy. of course it does.
+  score -= 10;
+
+  if (typeof sound !== 'undefined' && sound.play) sound.play('hit');
+
+  if (pitFalls === 5) {
+    showMessage("We're sorry.", 180);
+  } else if (pitFalls === 10) {
+    showMessage("Seriously, we apologize.", 180);
+  } else if (pitFalls === 15) {
+    showMessage("This is the game. This is all of it.", 180);
+  } else if (pitFalls % 3 === 0) {
+    showTip();
+  }
+}
+
+function updateET(dt) {
+  // Intentional input delay — feels SLIGHTLY wrong
+  if (inputDelay > 0) {
+    inputDelay -= dt;
+    return;
+  }
+
+  if (inPit) {
+    // In pit: extend neck to levitate out
+    if (neckExtended) {
+      levitating = true;
+    }
+    if (levitating) {
+      pitY -= dt * 0.015; // SLOWLY float out
+      energy -= dt * 0.02; // costs energy to levitate
+      if (pitY <= -4) {
+        // Finally out!
+        inPit = false;
+        levitating = false;
+        neckExtended = false;
+        pitY = 0;
+        // Move ET away from pit slightly
+        et.y -= 3;
+        if (et.y < 5) et.y = 5;
+      }
+    }
+    return;
+  }
+
+  if (pendingDir) {
+    et.dx = pendingDir.dx;
+    et.dy = pendingDir.dy;
+    pendingDir = null;
+    inputDelay = 80; // terrible input lag
+  }
+
+  et.x += et.dx;
+  et.y += et.dy;
+  et.dx = 0;
+  et.dy = 0;
+
+  // Bounds
+  if (et.y < 5) et.y = 5;
+  if (et.y > GH - 7) et.y = GH - 7;
+
+  // Zone transitions (left/right edges)
+  if (et.x < 0) {
+    currentZone = (currentZone + 5) % 6; // wrap backwards
+    et.x = GW - 5;
+    if (typeof sound !== 'undefined' && sound.play) sound.play('move');
+  } else if (et.x > GW - 4) {
+    currentZone = (currentZone + 1) % 6;
+    et.x = 1;
+    if (typeof sound !== 'undefined' && sound.play) sound.play('move');
+  }
+
+  // Pit check
+  if (checkPitCollision()) {
+    fallInPit();
+    return;
+  }
+
+  // Phone piece pickup
+  for (let p of phonePieces) {
+    if (!p.collected && p.zone === currentZone) {
+      if (Math.abs(et.x - p.x) < 3 && Math.abs(et.y - p.y) < 4) {
+        p.collected = true;
+        score += 100;
+        if (typeof sound !== 'undefined' && sound.play) sound.play('score');
+        let count = phonePieces.filter(pp => pp.collected).length;
+        if (count === 3) {
+          showMessage('ALL PIECES! Go to Landing Zone!', 180);
+        } else {
+          showMessage('Phone piece ' + count + '/3 found!', 120);
+        }
+      }
+    }
+  }
+
+  // Candy pickup
+  for (let c of candies) {
+    if (c.active && c.zone === currentZone) {
+      if (Math.abs(et.x - c.x) < 3 && Math.abs(et.y - c.y) < 3) {
+        c.active = false;
+        energy = Math.min(100, energy + 20);
+        score += 25;
+        if (typeof sound !== 'undefined' && sound.play) sound.play('score');
+      }
+    }
+  }
+
+  // Energy drain (constant)
+  energy -= dt * 0.008;
+
+  // Check calling home
+  if (currentZone === 4 && phonePieces.every(p => p.collected) && neckExtended) {
+    state = STATE.CALL;
+    callTimer = 0;
+    shipY = -10;
+    showMessage('Calling home...', 300);
+    if (typeof sound !== 'undefined' && sound.play) sound.play('score');
+  }
+}
+
+function updateEnemies(dt) {
+  // FBI Agent — drifts toward E.T., random jitter
+  fbi.moveTimer -= dt;
+  if (fbi.moveTimer <= 0) {
+    fbi.moveTimer = 200 + randInt(0, 300);
+    if (fbi.zone === currentZone) {
+      // Move toward E.T. with some randomness
+      fbi.dx = Math.sign(et.x - fbi.x) * (Math.random() > 0.3 ? 1 : 0);
+      fbi.dy = Math.sign(et.y - fbi.y) * (Math.random() > 0.3 ? 1 : 0);
+    } else {
+      // Random zone wandering
+      if (Math.random() > 0.8) {
+        fbi.zone = (fbi.zone + (Math.random() > 0.5 ? 1 : -1) + 6) % 6;
+        fbi.x = randInt(3, GW - 5);
+        fbi.y = randInt(6, GH - 8);
+      }
+    }
+  }
+  if (fbi.zone === currentZone) {
+    fbi.x += fbi.dx;
+    fbi.y += fbi.dy;
+    fbi.x = Math.max(1, Math.min(GW - 4, fbi.x));
+    fbi.y = Math.max(5, Math.min(GH - 7, fbi.y));
+
+    // Collision with E.T.
+    if (!inPit && Math.abs(et.x - fbi.x) < 4 && Math.abs(et.y - fbi.y) < 5) {
+      // Steal a phone piece!
+      let stolen = phonePieces.find(p => p.collected);
+      if (stolen) {
+        stolen.collected = false;
+        // Move the piece to a new random location
+        stolen.x = randInt(4, GW - 6);
+        stolen.y = randInt(6, GH - 8);
+        showMessage('Agent Smith took your stuff. Again.', 150);
+        score -= 50;
+        if (typeof sound !== 'undefined' && sound.play) sound.play('hit');
+      }
+      // Push E.T. away
+      et.x += (et.x > fbi.x ? 4 : -4);
+      inputDelay = 300; // extra stun
+    }
+  }
+
+  // Scientist — similar but takes E.T. to "building" (teleport to city, lose time)
+  scientist.moveTimer -= dt;
+  if (scientist.moveTimer <= 0) {
+    scientist.moveTimer = 300 + randInt(0, 400);
+    if (scientist.zone === currentZone) {
+      scientist.dx = Math.sign(et.x - scientist.x) * (Math.random() > 0.4 ? 1 : 0);
+      scientist.dy = Math.sign(et.y - scientist.y) * (Math.random() > 0.4 ? 1 : 0);
+    } else {
+      if (Math.random() > 0.85) {
+        scientist.zone = (scientist.zone + (Math.random() > 0.5 ? 1 : -1) + 6) % 6;
+        scientist.x = randInt(3, GW - 5);
+        scientist.y = randInt(6, GH - 8);
+      }
+    }
+  }
+  if (scientist.zone === currentZone) {
+    scientist.x += scientist.dx;
+    scientist.y += scientist.dy;
+    scientist.x = Math.max(1, Math.min(GW - 4, scientist.x));
+    scientist.y = Math.max(5, Math.min(GH - 7, scientist.y));
+
+    if (!inPit && Math.abs(et.x - scientist.x) < 4 && Math.abs(et.y - scientist.y) < 5) {
+      // Teleport to city, lose 10 seconds
+      currentZone = 2;
+      et.x = Math.floor(GW / 2);
+      et.y = Math.floor(GH / 2);
+      timer = Math.max(0, timer - 10);
+      showMessage('Science happened. You lost 10 seconds.', 150);
+      if (typeof sound !== 'undefined' && sound.play) sound.play('hit');
+      scientist.zone = 0; // scientist goes elsewhere
+      inputDelay = 400;
+    }
+  }
+}
+
+function updateCall(dt) {
+  callTimer += dt;
+  shipY += dt * 0.005;
+  if (shipY >= Math.floor(GH * 0.3)) {
+    shipY = Math.floor(GH * 0.3);
+  }
+  // After ship arrives and waits
+  if (callTimer > 4000) {
+    state = STATE.WIN;
+    winTimer = 0;
+    score += Math.ceil(timer) * 10 + Math.ceil(energy) * 5;
+    if (typeof sound !== 'undefined' && sound.play) sound.play('score');
+  }
+}
+
+function update(dt) {
+  flashTimer++;
+
+  if (state === STATE.PLAY) {
+    // Timer
+    timerAccum += dt;
+    if (timerAccum >= 1000) {
+      timerAccum -= 1000;
+      timer--;
+    }
+
+    updateET(dt);
+    updateEnemies(dt);
+
+    // Tip timer
+    if (tipTimer > 0) tipTimer -= dt * 0.06;
+    if (msgTimer > 0) msgTimer -= dt * 0.06;
+
+    // Random tips
+    if (Math.random() < 0.0003) showTip();
+
+    // Death conditions
+    if (energy <= 0) {
+      if (elliottRevives > 0) {
+        elliottRevives--;
+        energy = 50;
+        showMessage('Elliott revived E.T.! (' + elliottRevives + ' left)', 150);
+        if (typeof sound !== 'undefined' && sound.play) sound.play('score');
+      } else {
+        state = STATE.DEAD;
+        if (typeof sound !== 'undefined' && sound.play) sound.play('hit');
+      }
+    }
+    if (timer <= 0) {
+      state = STATE.DEAD;
+      if (typeof sound !== 'undefined' && sound.play) sound.play('hit');
+    }
+  } else if (state === STATE.CALL) {
+    updateCall(dt);
+    flashTimer++;
+  }
+}
+
+// ===== MAIN LOOP =====
+let lastTime = 0;
+
+function gameLoop(ts) {
+  let dt = ts - lastTime;
+  lastTime = ts;
+  if (dt > 100) dt = 16; // clamp
+
+  update(dt);
+
+  // Draw
+  if (state === STATE.TITLE) {
+    drawTitle();
+  } else if (state === STATE.DEAD) {
+    drawGameOver();
+  } else if (state === STATE.WIN) {
+    drawWinScreen();
+  } else if (state === STATE.PLAY || state === STATE.CALL) {
+    drawZone();
+    drawPhonePieces();
+    drawCandies();
+    drawShip();
+    drawET();
+    drawFBI();
+    drawScientist();
+    drawHUD();
+    drawTip();
+    drawMessage();
+
+    // In-pit overlay
+    if (inPit) {
+      ctx.fillStyle = '#000000aa';
+      ctx.fillRect(0, 0, W, PX * 5);
+      drawBlockText('YOU\'RE IN A PIT. TAP E.T. TO EXTEND NECK.', W/2, PX * 3, C.red, 10);
+    }
+
+    // Calling home
+    if (state === STATE.CALL) {
+      if (flashTimer % 20 < 10) {
+        drawBlockText('CALLING HOME...', W/2, H * 0.3, C.green, 16);
+      }
+    }
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+// ===== INPUT =====
+let touchStart = null;
+let touchStartTime = 0;
+
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  let t = e.touches[0];
+  touchStart = { x: t.clientX, y: t.clientY };
+  touchStartTime = Date.now();
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  if (!touchStart) return;
+  let t = e.changedTouches[0];
+  let dx = t.clientX - touchStart.x;
+  let dy = t.clientY - touchStart.y;
+  let dist = Math.sqrt(dx*dx + dy*dy);
+  let elapsed = Date.now() - touchStartTime;
+
+  if (state === STATE.TITLE) {
+    state = STATE.PLAY;
+    generateLevel();
+    showTip();
+    return;
+  }
+  if (state === STATE.DEAD || state === STATE.WIN) {
+    state = STATE.TITLE;
+    return;
+  }
+  if (state !== STATE.PLAY) return;
+
+  if (dist < 20 && elapsed < 300) {
+    // Tap — check if tapping on E.T.
+    let etScreenX = et.x * PX;
+    let etScreenY = et.y * PX;
+    if (t.clientX >= etScreenX - PX*2 && t.clientX <= etScreenX + PX*5 &&
+        t.clientY >= etScreenY - PX*3 && t.clientY <= etScreenY + PX*6) {
+      // Extend neck / levitate
+      neckExtended = !neckExtended;
+      if (typeof sound !== 'undefined' && sound.play) sound.play('move');
+    } else {
+      // Tap in a direction
+      let cx = W / 2;
+      let cy = H / 2;
+      let tdx = t.clientX - cx;
+      let tdy = t.clientY - cy;
+      if (Math.abs(tdx) > Math.abs(tdy)) {
+        pendingDir = { dx: tdx > 0 ? 2 : -2, dy: 0 };
+      } else {
+        pendingDir = { dx: 0, dy: tdy > 0 ? 2 : -2 };
+      }
+    }
+  } else {
+    // Swipe
+    if (Math.abs(dx) > Math.abs(dy)) {
+      pendingDir = { dx: dx > 0 ? 3 : -3, dy: 0 };
+    } else {
+      pendingDir = { dx: 0, dy: dy > 0 ? 3 : -3 };
+    }
+    neckExtended = false;
+  }
+  touchStart = null;
+}, { passive: false });
+
+// Keyboard (for testing)
+document.addEventListener('keydown', function(e) {
+  if (state === STATE.TITLE) {
+    state = STATE.PLAY;
+    generateLevel();
+    showTip();
+    return;
+  }
+  if (state === STATE.DEAD || state === STATE.WIN) {
+    state = STATE.TITLE;
+    return;
+  }
+  if (state !== STATE.PLAY) return;
+
+  switch(e.key) {
+    case 'ArrowLeft':  pendingDir = { dx: -2, dy: 0 }; neckExtended = false; break;
+    case 'ArrowRight': pendingDir = { dx: 2, dy: 0 };  neckExtended = false; break;
+    case 'ArrowUp':
+      if (inPit) {
+        neckExtended = true; // extend neck in pit = levitate
+      } else {
+        pendingDir = { dx: 0, dy: -2 };
+        neckExtended = false;
+      }
+      break;
+    case 'ArrowDown': pendingDir = { dx: 0, dy: 2 }; neckExtended = false; break;
+    case ' ':
+      neckExtended = !neckExtended;
+      if (typeof sound !== 'undefined' && sound.play) sound.play('move');
+      break;
+  }
+});
+
+// Mouse click fallback
+canvas.addEventListener('click', function(e) {
+  if (state === STATE.TITLE) {
+    state = STATE.PLAY;
+    generateLevel();
+    showTip();
+    return;
+  }
+  if (state === STATE.DEAD || state === STATE.WIN) {
+    state = STATE.TITLE;
+    return;
+  }
+});
+
+// ===== INIT =====
+resize();
+window.addEventListener('resize', resize);
+requestAnimationFrame(gameLoop);
+
+</script>
+</body></html>
