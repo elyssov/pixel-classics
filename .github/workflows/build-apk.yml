@@ -12,7 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone Iskra (mesh dependency)
+      - name: Clone Iskra (mesh core)
         uses: actions/checkout@v4
         with:
           repository: elyssov/iskra
@@ -26,31 +26,26 @@ jobs:
         env:
           GOTOOLCHAIN: auto
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20250305212854-3a7bc9f8a4de
-          go install golang.org/x/mobile/cmd/gobind@v0.0.0-20250305212854-3a7bc9f8a4de
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
 
       - uses: android-actions/setup-android@v3
 
       - name: Install NDK
         run: sdkmanager "ndk;26.1.10909125"
 
-      - name: Fix go.mod replace path
-        run: |
-          cd core
-          # Replace Windows local path with CI-relative path
-          sed -i 's|replace github.com/iskra-messenger/iskra => .*|replace github.com/iskra-messenger/iskra => ../iskra-src|' go.mod
-          cat go.mod
-          go mod tidy
-
-      - name: Build .aar
+      - name: Build .aar from Iskra module
         run: |
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
           export CGO_LDFLAGS="-Wl,-z,max-page-size=16384"
+          export GOTOOLCHAIN=auto
           gomobile init
           mkdir -p app/libs
+          # Build from within Iskra module where cmd/cargo has access to internal packages
+          cd iskra-src
           gomobile bind -v -target=android/arm64,android/arm -androidapi 24 \
-            -o app/libs/core.aar \
-            ./core/
+            -o ../app/libs/core.aar \
+            ./cmd/cargo/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -94,14 +89,12 @@ jobs:
           KEYSTORE_PASSWORD: pixelclassics2026
           KEY_ALIAS: pixelclassics
           KEY_PASSWORD: pixelclassics2026
-        run: |
-          cd $GITHUB_WORKSPACE
-          gradle -p . assembleRelease
+        run: gradle -p . assembleRelease
 
       - name: Rename APK
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/*.apk dist/pixel-classics-v1.apk 2>/dev/null || true
+          cp app/build/outputs/apk/release/*.apk dist/pixel-classics-v1.apk
           ls -la dist/
 
       - uses: actions/upload-artifact@v4
