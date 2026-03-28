@@ -562,9 +562,6 @@ const bootEl = document.getElementById('boot-screen');
 let bootIndex = 0;
 let fotaPromise = null;
 
-// Start FOTA fetch immediately during DOS boot
-try { startFotaCheck(); } catch(e) { console.error('FOTA init error:', e); }
-
 function typeBoot() {
   if (bootIndex >= bootLines.length) {
     // Boot done — wait for FOTA check, then decide
@@ -955,6 +952,8 @@ function postBeep() {
 }
 
 // ═══ START BOOT ═══
+// Start FOTA check (all functions now defined above)
+try { startFotaCheck(); } catch(e) { console.error('FOTA init error:', e); }
 // Small delay to feel like real boot — beep after memory test
 setTimeout(typeBoot, 300);
 
