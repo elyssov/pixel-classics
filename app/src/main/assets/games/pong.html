@@ -32,7 +32,8 @@ const state = {
   paddleW: 12,
   margin: 20,
   running: true,
-  touch: null
+  touch: null,
+  started: false
 };
 
 function resetBall(dir) {
@@ -57,11 +58,16 @@ canvas.addEventListener('touchmove', e => {
 }, { passive: false });
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
+  if (!state.started) { state.started = true; return; }
   state.touch = e.touches[0].clientY;
 }, { passive: false });
 canvas.addEventListener('mousemove', e => { state.touch = e.clientY; });
+canvas.addEventListener('click', e => {
+  if (!state.started) { state.started = true; }
+});
 
 function update() {
+  if (!state.started) return;
   const W = canvas.width, H = canvas.height;
   const b = state.ball;
   const ph = state.paddleH / 2;
@@ -130,7 +136,32 @@ function update() {
   if (b.x > W) { state.p1.score++; resetBall(-1); if (typeof SFX !== 'undefined') SFX.score(); }
 }
 
+function drawTitle() {
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#4fc3f7';
+  ctx.font = 'bold 48px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('PONG', W / 2, H * 0.22);
+
+  ctx.fillStyle = '#aaa';
+  ctx.font = '16px monospace';
+  ctx.fillText('Move your paddle to hit the ball.', W / 2, H * 0.40);
+  ctx.fillText('First to 11 wins.', W / 2, H * 0.48);
+  ctx.fillText('Touch/mouse to move paddle.', W / 2, H * 0.56);
+
+  const blink = Math.floor(performance.now() / 500) % 2;
+  if (blink) {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText('TAP TO START', W / 2, H * 0.75);
+  }
+}
+
 function draw() {
+  if (!state.started) { drawTitle(); return; }
   const W = canvas.width, H = canvas.height;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);

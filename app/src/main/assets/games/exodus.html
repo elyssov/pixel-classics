@@ -40,7 +40,7 @@
   }
   #overlay.show { display: flex; }
   #overlay h1 { font-size: 24px; margin-bottom: 12px; }
-  #overlay p { font-size: 14px; margin: 4px 0; color: #aaa; }
+  #overlay p { font-size: 14px; margin: 4px 0; color: #aaa; white-space: pre-line; }
   #overlay .stars { font-size: 28px; margin: 10px 0; }
   #overlay button {
     margin-top: 16px; padding: 10px 28px; font-size: 16px; font-family: monospace;
@@ -208,7 +208,7 @@ const LEVELS = [
     }
   },
   { // 9 — trap level, obvious path is dead end
-    people: 25, tools: [1,0,5,0,1], fireSpeed: 0.018,
+    people: 25, tools: [1,1,4,0,1], fireSpeed: 0.018,
     tutorial: 'The obvious path is a dead end. Use signs!',
     generate(m) {
       fillGround(m);
@@ -397,7 +397,12 @@ function hideOverlay() { document.getElementById('overlay').classList.remove('sh
 
 window.ovAction = function() {
   hideOverlay();
-  if (gameState === 'menu') {
+  if (gameState === 'rules') {
+    hideOverlay();
+    rulesShown = true;
+    showLevelIntro();
+    return;
+  } else if (gameState === 'menu') {
     gameState = 'playing';
     initLevel(currentLevel);
   } else if (gameState === 'levelComplete') {
@@ -424,6 +429,14 @@ window.ovAction2 = function() {
 };
 
 let totalSaved = 0, totalAll = 0;
+let rulesShown = false;
+
+function showRules() {
+  gameState = 'rules';
+  showOverlay('EXODUS',
+    'People are fleeing. РКН is chasing them.\nPlace tools to guide them to safety.\nTap a tool, then tap the map to place it.',
+    'START', '', '');
+}
 
 function showLevelIntro() {
   gameState = 'menu';
@@ -592,6 +605,17 @@ function update() {
   for (const p of people) {
     if (!p.alive || p.saved) continue;
 
+    // check exit FIRST — people in the exit zone are always saved
+    const pExitTX = Math.floor(p.x / T);
+    const pExitTY = Math.floor(p.y / T);
+    if (pExitTX >= 0 && pExitTX < MW && pExitTY >= 0 && pExitTY < MH && map[pExitTY][pExitTX] === EXIT) {
+      p.saved = true;
+      saved++;
+      addParticles(p.x, p.y, '#0f0', 12, 4);
+      SFX.eat();
+      continue;
+    }
+
     // caught by cheburashka
     if (p.x < chebX + CHEB_W && p.x > chebX - 5) {
       p.alive = false;
@@ -717,16 +741,6 @@ function update() {
           p.vx = -p.vx;
         }
       }
-    }
-
-    // check exit
-    const tx = Math.floor(p.x / T);
-    const ty = Math.floor(p.y / T);
-    if (tx >= 0 && tx < MW && ty >= 0 && ty < MH && map[ty][tx] === EXIT) {
-      p.saved = true;
-      saved++;
-      addParticles(p.x, p.y, '#0f0', 12, 4);
-      SFX.eat();
     }
 
     // bounds
@@ -1106,6 +1120,37 @@ function drawPlacedTools() {
   }
 }
 
+function drawExitLabel(scrollX) {
+  // find exit zone bounds
+  let exMinX = MW, exMaxX = 0, exMinY = MH, exMaxY = 0;
+  for (let ty = 0; ty < MH; ty++) for (let tx = 0; tx < MW; tx++) {
+    if (map[ty][tx] === EXIT) {
+      if (tx < exMinX) exMinX = tx;
+      if (tx > exMaxX) exMaxX = tx;
+      if (ty < exMinY) exMinY = ty;
+      if (ty > exMaxY) exMaxY = ty;
+    }
+  }
+  if (exMinX > exMaxX) return;
+  const cx = ((exMinX + exMaxX + 1) / 2) * T - scrollX;
+  const cy = (exMinY - 1) * T;
+  // pulsing glow
+  const pulse = 0.6 + 0.4 * Math.sin(animFrame * 0.08);
+  ctx.save();
+  ctx.font = 'bold 14px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  // glow layers
+  ctx.shadowColor = 'rgba(0,255,80,' + pulse + ')';
+  ctx.shadowBlur = 10 + pulse * 6;
+  ctx.fillStyle = 'rgba(0,255,80,' + (0.7 + 0.3 * pulse) + ')';
+  ctx.fillText('VPN', cx, cy);
+  // second pass for stronger glow
+  ctx.shadowBlur = 4;
+  ctx.fillText('VPN', cx, cy);
+  ctx.restore();
+}
+
 function draw() {
   // clear
   ctx.fillStyle = '#111';
@@ -1125,6 +1170,9 @@ function draw() {
       drawTile(sx, sy, tx, ty);
     }
   }
+
+  // draw VPN label on exit zone
+  drawExitLabel(scrollX);
 
   // draw placed tools
   drawPlacedTools();
@@ -1300,9 +1348,10 @@ function gameLoop(ts) {
   lastTime = ts;
   accumulator += dt;
 
-  while (accumulator >= TICK) {
+  // Cap to 1 update per frame to avoid speed-up on slow devices
+  if (accumulator >= TICK) {
     update();
-    accumulator -= TICK;
+    accumulator = 0;
   }
   draw();
 }
@@ -1310,11 +1359,11 @@ function gameLoop(ts) {
 // ─── START ───
 function boot() {
   if (window._gameReady) {
-    showLevelIntro();
+    showRules();
     requestAnimationFrame(gameLoop);
   } else {
     window.addEventListener('gameready', () => {
-      showLevelIntro();
+      showRules();
       requestAnimationFrame(gameLoop);
     });
   }

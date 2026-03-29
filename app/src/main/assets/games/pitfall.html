@@ -104,7 +104,8 @@ const UNDERGROUND_Y = H * 0.6;
 const SCR_NORMAL = 0, SCR_WATER = 1, SCR_TAR = 2, SCR_CROC = 3, SCR_QUICKSAND = 4;
 
 // --- Game State ---
-let gameState = 'title'; // title, playing, gameover
+let gameState = 'title'; // title, tutorial, playing, gameover
+let hasSeenTutorial = false;
 let score, lives, timeLeft, timerInterval;
 let harry, camera;
 let currentScreen, screenData;
@@ -303,6 +304,7 @@ document.addEventListener('keyup', e => {
 
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
+  if (gameState === 'tutorial') { startGame(); return; }
   if (gameState === 'title') { startGame(); return; }
   if (gameState === 'gameover') { gameState = 'title'; return; }
 }, { passive: false });
@@ -320,6 +322,7 @@ setupTouchBtn('btn-jump',  () => { touchJump = true; },  () => { touchJump = fal
 setupTouchBtn('btn-down',  () => { touchDown = true; swipeDown = true; }, () => { touchDown = false; });
 
 canvas.addEventListener('mousedown', e => {
+  if (gameState === 'tutorial') { startGame(); return; }
   if (gameState === 'title') { startGame(); return; }
   if (gameState === 'gameover') { gameState = 'title'; return; }
 });
@@ -1031,8 +1034,49 @@ function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
+// --- Tutorial Overlay ---
+function drawTutorial() {
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = PAL.green;
+  ctx.font = 'bold 22px monospace';
+  ctx.fillText('PITFALL!', W / 2, H * 0.15);
+
+  ctx.fillStyle = PAL.white;
+  ctx.font = '10px monospace';
+  const lines = [
+    'Run through 255 screens of jungle.',
+    'Jump over pits, logs, and scorpions.',
+    'Swing on vines. Go underground via ladders.',
+  ];
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], W / 2, H * 0.30 + i * 18);
+  }
+
+  ctx.fillStyle = PAL.skyBlue;
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('\u2190 \u2192 Run  |  JUMP  |  \u2193 Ladder', W / 2, H * 0.68);
+
+  const blink = Math.sin(frameCount * 0.08) > 0;
+  if (blink) {
+    ctx.fillStyle = PAL.gold;
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText('[ START ]', W / 2, H * 0.85);
+  }
+
+  ctx.textAlign = 'left';
+}
+
 // --- Game Logic ---
 function startGame() {
+  if (!hasSeenTutorial) {
+    hasSeenTutorial = true;
+    gameState = 'tutorial';
+    return;
+  }
   score = 2000;
   lives = 3;
   timeLeft = GAME_TIME;
@@ -1426,13 +1470,18 @@ function drawTitle() {
   ctx.font = '9px monospace';
   const blink = Math.sin(frameCount * 0.06) > 0;
   if (blink) {
-    ctx.fillText('TAP OR PRESS ENTER TO START', W / 2, H * 0.78);
+    ctx.fillText('TAP OR PRESS ENTER TO START', W / 2, H * 0.93);
   }
 
   ctx.fillStyle = PAL.skyBlue;
   ctx.font = '8px monospace';
-  ctx.fillText('ARROWS/WASD: MOVE  |  SPACE/UP: JUMP', W / 2, H * 0.86);
-  ctx.fillText('DOWN: LADDER  |  E: GRAB VINE', W / 2, H * 0.93);
+  ctx.fillText('RUN THROUGH THE JUNGLE', W / 2, H * 0.58);
+  ctx.fillText('JUMP OVER HAZARDS', W / 2, H * 0.64);
+  ctx.fillText('COLLECT GOLD, SILVER, DIAMONDS', W / 2, H * 0.70);
+  ctx.fillText('GO UNDERGROUND VIA LADDERS', W / 2, H * 0.76);
+  ctx.fillStyle = PAL.gold;
+  ctx.font = '7px monospace';
+  ctx.fillText('<- -> TO RUN | JUMP TO JUMP | DOWN FOR LADDERS', W / 2, H * 0.84);
 
   ctx.textAlign = 'left';
 }
@@ -1508,6 +1557,12 @@ function draw() {
 
   if (gameState === 'title') {
     drawTitle();
+    frameCount++;
+    return;
+  }
+
+  if (gameState === 'tutorial') {
+    drawTutorial();
     frameCount++;
     return;
   }
@@ -1602,8 +1657,9 @@ function gameLoop(timestamp) {
 
 // --- Input: Enter to start ---
 document.addEventListener('keydown', e => {
-  if (e.code === 'Enter') {
-    if (gameState === 'title') startGame();
+  if (e.code === 'Enter' || e.code === 'Space') {
+    if (gameState === 'tutorial') startGame();
+    else if (gameState === 'title') startGame();
     else if (gameState === 'gameover') gameState = 'title';
   }
 });

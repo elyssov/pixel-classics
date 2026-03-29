@@ -418,7 +418,7 @@ function update(dt) {
   scrollY += scrollSpeed * dt;
 
   // Fuel depletion
-  fuel -= (8 + level * 1.5) * dt;
+  fuel -= (4 + level * 0.75) * dt;
   if (fuel <= 0) {
     fuel = 0;
     killPlayer();
@@ -476,8 +476,8 @@ function update(dt) {
     for (let i = 0; i < count; i++) {
       spawnEnemy(nextSpawnY + i * 80);
     }
-    // Fuel depot every ~3 spawns
-    if (Math.random() < 0.35) {
+    // Fuel depot — spawn frequently
+    if (Math.random() < 0.55) {
       spawnFuel(nextSpawnY + 40 + Math.random() * 100);
     }
     nextSpawnY += 200 + Math.random() * 150 - level * 5;
@@ -863,13 +863,12 @@ function draw() {
 
     const instrScale = PX;
     const lines = [
-      'ARROWS - MOVE LEFT RIGHT',
-      'FIRE BUTTON - SHOOT',
-      'HOLD FIRE FOR AUTO FIRE',
+      'FLY UP THE RIVER',
+      'DESTROY ENEMIES',
+      'LAND ON FUEL DEPOTS TO REFUEL',
+      'DONT HIT THE RIVERBANKS!',
       '',
-      'DESTROY BRIDGES TO PASS',
-      'FLY OVER FUEL DEPOTS',
-      'AVOID BANKS AND ENEMIES',
+      '<- -> TO MOVE | FIRE TO SHOOT',
     ];
     for (let i = 0; i < lines.length; i++) {
       const lw = textWidth(lines[i], instrScale);

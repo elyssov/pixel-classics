@@ -414,6 +414,7 @@ function addParticles(x, y, count, color) {
 }
 
 function draw() {
+  if (!gameStarted) return;
   const w = W(), h = H();
 
   // Sky

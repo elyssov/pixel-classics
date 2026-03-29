@@ -1115,15 +1115,19 @@ function drawTitleScreen() {
 
   // Instructions
   ctx.fillStyle = C_TEXT;
-  ctx.font = `${Math.floor(TILE * 0.55)}px monospace`;
-  ctx.fillText('ARROWS/SWIPE to move', cx, cy + TILE * 1.5);
-  ctx.fillText('SPACE/FIRE to shoot', cx, cy + TILE * 2.3);
+  ctx.font = `${Math.floor(TILE * 0.5)}px monospace`;
+  ctx.fillText('DIG THROUGH EARTH', cx, cy + TILE * 1.2);
+  ctx.fillText('COLLECT ALL EMERALDS', cx, cy + TILE * 1.8);
+  ctx.fillText('PUSH GOLD BAGS ONTO ENEMIES', cx, cy + TILE * 2.4);
+  ctx.fillText('AVOID NOBBINS AND HOBBINS!', cx, cy + TILE * 3.0);
+  ctx.fillStyle = C_GOLD;
+  ctx.fillText('D-PAD TO MOVE | FIRE TO SHOOT', cx, cy + TILE * 3.8);
 
   // Blink
   if (Math.floor(frameCount / 30) % 2 === 0) {
     ctx.fillStyle = C_SCORE;
     ctx.font = `bold ${Math.floor(TILE * 0.7)}px monospace`;
-    ctx.fillText('TAP OR PRESS ENTER', cx, cy + TILE * 3.5);
+    ctx.fillText('TAP OR PRESS ENTER', cx, cy + TILE * 4.8);
   }
 }
 
