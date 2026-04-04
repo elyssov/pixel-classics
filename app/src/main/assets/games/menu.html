@@ -401,6 +401,7 @@
     #donate-overlay .donate-close { margin-top: 6px; padding: 2px 16px; font-size: 11px; }
   }
 </style>
+<script src="sound.js"></script>
 </head><body>
 
 <!-- ═══ DOS Boot Screen ═══ -->
@@ -600,6 +601,7 @@ function typeBoot() {
 
 // ═══ SHOW NORTON COMMANDER ═══
 function showNC() {
+  if (window.SFX) SFX.pcBoot(); // POST beep — like real IBM PC
   bootEl.style.display = 'none';
   const nc = document.getElementById('nc-screen');
   nc.style.display = 'flex';
@@ -639,9 +641,11 @@ function showNC() {
     selectedIdx = idx;
     rows[idx].classList.add('selected');
     rows[idx].scrollIntoView({ block: 'nearest' });
+    if (window.SFX) SFX.pcClick();
   }
 
   function launchSelected() {
+    if (window.SFX) SFX.pcBeep();
     const g = games[selectedIdx];
     if (g) launchGame(g.name, g.ext, g.size, g.file);
   }

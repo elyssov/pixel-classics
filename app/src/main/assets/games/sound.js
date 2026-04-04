@@ -92,5 +92,12 @@
     // General
     gameOver:   () => { beep(400, 0.2, 'sawtooth', 0.1); setTimeout(() => beep(300, 0.2, 'sawtooth', 0.1), 200); setTimeout(() => beep(200, 0.4, 'sawtooth', 0.1), 400); },
     menuSelect: () => beep(500, 0.04, 'square', 0.06),
+
+    // PC Speaker beep — authentic IBM PC sound
+    pcBeep:     () => beep(1000, 0.06, 'square', 0.05),    // classic 1kHz beep
+    pcClick:    () => beep(2000, 0.015, 'square', 0.04),   // short click
+    pcError:    () => { beep(200, 0.15, 'square', 0.06); setTimeout(() => beep(200, 0.15, 'square', 0.06), 180); },
+    pcBoot:     () => { beep(1000, 0.2, 'square', 0.05); setTimeout(() => beep(500, 0.1, 'square', 0.04), 250); }, // POST beep
+    pcKey:      () => beep(1500, 0.01, 'square', 0.03),    // keyboard press
   };
 })();
